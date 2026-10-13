@@ -1,5 +1,6 @@
-// Optional audio-reactive visualizer. Off by default: routing audio through Web Audio can stop
-// background playback on some mobile browsers, so the user opts in from Settings.
+// Retro LCD visualizer: chunky spectrum bars with falling peak caps, or an oscilloscope line.
+// It needs the audio routed through Web Audio, which can stop background playback on some
+// phones, so it starts switched off and the user turns it on (tap the display or use Settings).
 // Once attached, the audio element stays routed through the AudioContext until reload.
 
 let ctx;
@@ -13,99 +14,95 @@ export function attach(audio) {
   if (!AC) return;
   ctx = new AC();
   analyser = ctx.createAnalyser();
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.8;
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.6;
   ctx.createMediaElementSource(audio).connect(analyser);
   analyser.connect(ctx.destination);
   freq = new Uint8Array(analyser.frequencyBinCount);
   wave = new Uint8Array(analyser.fftSize);
   audio.addEventListener('play', () => ctx.state === 'suspended' && ctx.resume());
+  if (!audio.paused) ctx.resume();
 }
 
 export const isAttached = () => Boolean(ctx);
 
-/** Draws into `canvas` every frame until the returned stop() is called. */
-export function run(canvas, hue = 260) {
+const PIXEL = 3; // CSS pixels per "LCD pixel"
+
+let colors = {};
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name) => cs.getPropertyValue(name).trim();
+  colors = { low: v('--vis-low'), high: v('--vis-high'), peak: v('--vis-peak'), dim: v('--lcd-dim') };
+}
+window.addEventListener('skinchange', readColors);
+
+/**
+ * Draws into `canvas` every frame until the returned stop() is called.
+ * `getMode` returns 'bars' | 'scope' | 'off' and is read each frame.
+ */
+export function run(canvas, getMode) {
   const g = canvas.getContext('2d');
   let raf = 0;
-  let energySmoothed = 0;
+  let peaks = [];
+  let levels = [];
+  if (!colors.low) readColors();
 
   const frame = () => {
     raf = requestAnimationFrame(frame);
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const hgt = canvas.clientHeight;
-    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(hgt * dpr)) {
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(hgt * dpr);
+    const w = Math.max(8, Math.floor(canvas.clientWidth / PIXEL));
+    const h = Math.max(6, Math.floor(canvas.clientHeight / PIXEL));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      peaks = [];
+      levels = [];
     }
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, w, hgt);
-    const cx = w / 2;
-    const cy = hgt / 2;
-    const base = Math.min(w, hgt) * 0.28;
+    g.clearRect(0, 0, w, h);
+    const mode = getMode();
+    const live = Boolean(analyser) && mode !== 'off';
 
-    if (!analyser) {
-      // Not attached: calm placeholder disc.
-      g.fillStyle = `hsl(${hue} 60% 55% / 0.85)`;
-      g.beginPath();
-      g.arc(cx, cy, base, 0, Math.PI * 2);
-      g.fill();
+    if (mode === 'scope') {
+      if (live) analyser.getByteTimeDomainData(wave);
+      g.fillStyle = colors.high;
+      for (let x = 0; x < w; x++) {
+        const sample = live ? (wave[Math.floor((x / w) * wave.length)] - 128) / 128 : 0;
+        const y = Math.round(h / 2 - sample * (h / 2 - 1));
+        g.fillRect(x, Math.min(h - 1, Math.max(0, y)), 1, 1);
+      }
       return;
     }
 
-    analyser.getByteFrequencyData(freq);
-    analyser.getByteTimeDomainData(wave);
-
-    // Low-end energy drives a pulsing core.
-    let energy = 0;
-    const lowBins = 48;
-    for (let i = 0; i < lowBins; i++) energy += freq[i];
-    energy /= lowBins * 255;
-    energySmoothed += (energy - energySmoothed) * 0.2;
-
-    const core = base * (0.85 + energySmoothed * 0.5);
-    const grad = g.createRadialGradient(cx, cy, core * 0.1, cx, cy, core * 1.6);
-    grad.addColorStop(0, `hsl(${hue} 80% 65% / 0.95)`);
-    grad.addColorStop(1, `hsl(${(hue + 60) % 360} 80% 50% / 0)`);
-    g.fillStyle = grad;
-    g.beginPath();
-    g.arc(cx, cy, core * 1.6, 0, Math.PI * 2);
-    g.fill();
-
-    // Radial spectrum bars.
-    const bars = 96;
-    const usable = Math.floor(freq.length * 0.6);
-    g.lineCap = 'round';
-    g.lineWidth = Math.max(2, (Math.PI * 2 * core) / bars / 2.2);
+    // Bars: 3-pixel-wide columns with a 1-pixel gap, log-spaced over the spectrum.
+    const bars = Math.max(4, Math.floor((w + 1) / 4));
+    if (live) analyser.getByteFrequencyData(freq);
+    const usable = freq ? Math.floor(freq.length * 0.7) : 0;
+    const grad = g.createLinearGradient(0, h, 0, 0);
+    grad.addColorStop(0, colors.low);
+    grad.addColorStop(1, colors.high);
     for (let i = 0; i < bars; i++) {
-      // Log-ish mapping so bass doesn't hog the circle.
-      const idx = Math.floor((Math.pow(i / bars, 1.8)) * usable);
-      const v = freq[idx] / 255;
-      const angle = (i / bars) * Math.PI * 2 - Math.PI / 2;
-      const r1 = core * 1.05;
-      const r2 = r1 + v * base * 0.9 + 2;
-      g.strokeStyle = `hsl(${(hue + i * 1.5) % 360} 85% ${55 + v * 20}% / ${0.35 + v * 0.65})`;
-      g.beginPath();
-      g.moveTo(cx + Math.cos(angle) * r1, cy + Math.sin(angle) * r1);
-      g.lineTo(cx + Math.cos(angle) * r2, cy + Math.sin(angle) * r2);
-      g.stroke();
+      let v = 0;
+      if (live) {
+        const lo = Math.floor(Math.pow(i / bars, 2) * usable);
+        const hi = Math.max(lo + 1, Math.floor(Math.pow((i + 1) / bars, 2) * usable));
+        for (let j = lo; j < hi; j++) v = Math.max(v, freq[j]);
+        v /= 255;
+      }
+      // Smooth fall-off so bars drop like the old analyzers.
+      levels[i] = Math.max(v, (levels[i] || 0) - 0.04);
+      const barH = Math.round(levels[i] * h);
+      const x = i * 4;
+      g.fillStyle = colors.dim;
+      g.fillRect(x, h - 1, 3, 1);
+      if (barH > 0) {
+        g.fillStyle = grad;
+        g.fillRect(x, h - barH, 3, barH);
+      }
+      peaks[i] = Math.max(barH, (peaks[i] || 0) - 0.25);
+      if (peaks[i] >= 1) {
+        g.fillStyle = colors.peak;
+        g.fillRect(x, h - Math.ceil(peaks[i]) - 1, 3, 1);
+      }
     }
-
-    // Waveform ring.
-    g.lineWidth = 1.5;
-    g.strokeStyle = `hsl(${hue} 30% 95% / 0.7)`;
-    g.beginPath();
-    for (let i = 0; i <= 256; i++) {
-      const sample = (wave[Math.floor((i / 256) * (wave.length - 1))] - 128) / 128;
-      const angle = (i / 256) * Math.PI * 2;
-      const r = core * 0.7 + sample * core * 0.25;
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r;
-      if (i === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
-    }
-    g.stroke();
   };
   frame();
   return () => cancelAnimationFrame(raf);

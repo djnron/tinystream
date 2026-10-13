@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#15131d">
+  <meta name="theme-color" content="#1b1c22">
   <meta name="description" content="Play your music straight from Google Drive and Dropbox.">
   <title>Music Box</title>
   <link rel="manifest" href="manifest.webmanifest">
@@ -21,9 +21,11 @@
     <a id="settings-link" class="icon-btn" href="#/settings" aria-label="Settings"></a>
   </header>
   <div id="offline" class="banner" hidden>You're offline. Only music saved on this device will play.</div>
-  <main id="view"></main>
+  <div class="layout">
+    <aside id="full" aria-label="Player"></aside>
+    <main id="view"></main>
+  </div>
   <footer id="mini" hidden></footer>
-  <section id="full" hidden aria-label="Now playing"></section>
   <div id="toasts" aria-live="polite"></div>
   <noscript>Music Box needs JavaScript.</noscript>
 </body>

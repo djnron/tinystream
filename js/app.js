@@ -3,7 +3,9 @@ import { icons } from './icons.js';
 import { Player } from './player.js';
 import { getProvider, providers } from './providers/index.js';
 import * as store from './store.js';
-import { AuthRequiredError, fmtBytes, fmtTime, h, hueOf, isNetworkError, toast } from './util.js';
+import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
+import { lcdDigits, lcdTime } from './lcd.js';
+import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
 import * as visualizer from './visualizer.js';
 
 const player = new Player();
@@ -392,16 +394,24 @@ async function settingsView(stale) {
         onchange: (e) => store.setSetting('repeat', e.target.value),
       }, [['all', 'Start over'], ['off', 'Stop'], ['one', 'Repeat current track']].map(([v, t]) =>
         h('option', { value: v, selected: s.repeat === v }, t)))),
-    settingToggle({
-      label: 'Visualizer',
-      desc: 'Animated graphics that react to the music. May interrupt background playback on some phones.',
-      checked: s.visualizer,
-      onchange: (on) => {
-        store.setSetting('visualizer', on);
-        if (on) visualizer.attach(player.audio);
-        else if (visualizer.isAttached()) toast('Visualizer turns fully off after reloading the app');
-      },
-    }));
+    h('label', { class: 'setting' },
+      h('span', { class: 'setting-text' },
+        h('span', { class: 'setting-label' }, 'Visualizer'),
+        h('span', { class: 'setting-desc' },
+          'Also changes when you tap the display. Can interrupt background playback on some phones, so it starts off.')),
+      h('select', { onchange: (e) => setVisMode(e.target.value) },
+        [['off', 'Off'], ['bars', 'Spectrum bars'], ['scope', 'Oscilloscope']].map(([v, t]) =>
+          h('option', { value: v, selected: s.visMode === v }, t)))));
+
+  const skinSection = h('section', { class: 'card' },
+    h('h2', {}, 'Skin'),
+    h('div', { class: 'skins' }, allSkins().map((sk) => skinSwatch(sk))),
+    h('div', { class: 'actions' },
+      h('label', { class: 'btn' }, 'Load skin file…',
+        h('input', { type: 'file', accept: '.json,.mbskin,application/json', hidden: true, onchange: loadSkinFile })),
+      h('button', { class: 'btn', onclick: downloadSkinTemplate }, 'Download skin template')),
+    h('p', { class: 'setting-desc' },
+      'Make your own: download the template (it starts from the current skin), change the colors, gradients and fonts, then load it here.'));
 
   const accounts = h('section', { class: 'card' },
     h('h2', {}, 'Accounts'),
@@ -421,7 +431,60 @@ async function settingsView(stale) {
     h('div', { class: 'actions' },
       h('button', { class: 'btn danger', onclick: resetApp }, 'Reset app')));
 
-  show(h('div', { class: 'stack' }, downloadsSection, playbackSection, accounts, about));
+  show(h('div', { class: 'stack' }, skinSection, downloadsSection, playbackSection, accounts, about));
+}
+
+// ---------------------------------------------------------------- skins
+
+function allSkins() {
+  return store.settings.customSkin ? [...SKINS, store.settings.customSkin] : SKINS;
+}
+
+function currentSkin() {
+  return allSkins().find((sk) => sk.id === store.settings.skin) || SKINS[0];
+}
+
+function useSkin(sk) {
+  store.setSetting('skin', sk.id);
+  applySkin(sk);
+}
+
+/** A tiny preview of the skin, drawn with its own tokens. */
+function skinSwatch(sk) {
+  const el = h('button', {
+    class: `swatch${sk.id === store.settings.skin ? ' active' : ''}`,
+    'aria-pressed': String(sk.id === store.settings.skin),
+    onclick: () => { useSkin(sk); render(); },
+  },
+  h('span', { class: 'sw-deck' },
+    h('span', { class: 'sw-title' }),
+    h('span', { class: 'sw-lcd', html: lcdDigits(' 1:23') })),
+  h('span', { class: 'sw-name' }, sk.name));
+  for (const [k, v] of Object.entries({ ...TOKENS, ...sk.tokens })) el.style.setProperty(`--${k}`, v);
+  return el;
+}
+
+async function loadSkinFile(e) {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    if (file.size > 50_000) throw new Error('That file is too big to be a skin');
+    const sk = parseSkinFile(await file.text());
+    store.setSetting('customSkin', sk);
+    useSkin(sk);
+    toast(`Skin "${sk.name}" loaded`);
+    render();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function downloadSkinTemplate() {
+  const blob = new Blob([skinTemplate(currentSkin())], { type: 'application/json' });
+  const a = h('a', { href: URL.createObjectURL(blob), download: 'music-box-skin.json' });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // ---------------------------------------------------------------- account actions
@@ -455,118 +518,236 @@ async function resetApp() {
   location.replace(location.pathname);
 }
 
-// ---------------------------------------------------------------- now playing (mini bar + full screen)
+// ---------------------------------------------------------------- the deck (player window + playlist)
+//
+// One skinnable player for every screen size. Wide screens show the deck and playlist as a column
+// next to the library. Phones show a compact bar at the bottom that opens the deck full-screen.
 
 const mini = $('#mini');
 const full = $('#full');
+const wide = matchMedia('(min-width: 900px)');
 let stopViz = null;
+let shownQueue = null;
+let shownTrackId = null;
+const lcdCache = new Map(); // element -> last text drawn, so digits only re-render when they change
+
+const deckVisible = () => wide.matches || document.body.classList.contains('full-open');
+
+function deckButton(name, label, onclick, id) {
+  return h('button', { class: 'deck-btn', id, 'aria-label': label, title: label, html: icons[name], onclick });
+}
 
 function buildPlayerUi() {
   mini.replaceChildren(
     h('div', { class: 'mini-progress' }, h('span', { id: 'mini-bar' })),
     h('button', { class: 'mini-info', onclick: openFull, 'aria-label': 'Open player' },
-      h('span', { class: 'art', id: 'mini-art' }),
+      h('span', { class: 'lcd mini-lcd', id: 'mini-time' }),
       h('span', { class: 'row-text' },
         h('span', { class: 'row-title', id: 'mini-title' }),
         h('span', { class: 'row-sub', id: 'mini-sub' }))),
-    h('button', { class: 'icon-btn', 'aria-label': 'Previous', html: icons.prev, onclick: () => player.prev() }),
-    h('button', { class: 'icon-btn big', id: 'mini-play', 'aria-label': 'Play', onclick: () => player.toggle() }),
-    h('button', { class: 'icon-btn', 'aria-label': 'Next', html: icons.next, onclick: () => player.next() }));
+    h('button', { class: 'deck-btn', id: 'mini-play', 'aria-label': 'Play', onclick: () => player.toggle() }),
+    h('button', { class: 'deck-btn', 'aria-label': 'Next', html: icons.next, onclick: () => player.next() }));
 
-  const seek = h('input', { type: 'range', id: 'seek', min: 0, max: 1, step: 0.1, value: 0, 'aria-label': 'Seek' });
-  seek.addEventListener('input', () => { seek.dataset.dragging = '1'; $('#t-cur').textContent = fmtTime(Number(seek.value)); });
+  const seek = h('input', { type: 'range', class: 'slider seek', id: 'seek', min: 0, max: 1, step: 0.1, value: 0, 'aria-label': 'Seek' });
+  seek.addEventListener('input', () => { seek.dataset.dragging = '1'; });
   seek.addEventListener('change', () => { delete seek.dataset.dragging; player.seek(Number(seek.value)); });
 
+  const vol = h('input', {
+    type: 'range', class: 'slider vol', min: 0, max: 1, step: 0.01, value: store.settings.volume, 'aria-label': 'Volume',
+    oninput: (e) => player.setVolume(Number(e.target.value)),
+  });
+
   full.replaceChildren(
-    h('header', { class: 'full-head' },
-      h('button', { class: 'icon-btn', 'aria-label': 'Close player', html: icons.down, onclick: closeFull }),
-      h('span', {}, 'Now playing'),
-      h('span', { class: 'icon-btn', id: 'full-save' })),
-    h('canvas', { id: 'viz' }),
-    h('div', { class: 'full-meta' },
-      h('h2', { id: 'full-title' }),
-      h('p', { class: 'muted', id: 'full-sub' })),
-    h('div', { class: 'seek' }, seek,
-      h('div', { class: 'times' }, h('span', { id: 't-cur' }, '0:00'), h('span', { id: 't-dur' }, '0:00'))),
-    h('div', { class: 'controls' },
-      h('button', { class: 'icon-btn', id: 'btn-shuffle', 'aria-label': 'Shuffle', html: icons.shuffle, onclick: () => player.toggleShuffle() }),
-      h('button', { class: 'icon-btn', 'aria-label': 'Previous', html: icons.prev, onclick: () => player.prev() }),
-      h('button', { class: 'icon-btn play-big', id: 'full-play', 'aria-label': 'Play', onclick: () => player.toggle() }),
-      h('button', { class: 'icon-btn', 'aria-label': 'Next', html: icons.next, onclick: () => player.next() }),
-      h('button', { class: 'icon-btn', id: 'btn-repeat', 'aria-label': 'Repeat', onclick: () => player.cycleRepeat() })),
-    h('h3', { class: 'upnext-head' }, 'Up next'),
-    h('ol', { class: 'list upnext', id: 'upnext' }));
+    h('div', { class: 'window deck' },
+      h('div', { class: 'titlebar' },
+        h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'MUSIC BOX'), h('span', { class: 'tb-grip' }),
+        h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull })),
+      h('div', { class: 'deck-body' },
+        h('div', { class: 'lcd screen' },
+          h('div', { class: 'lcd-left' },
+            h('span', { class: 'lcd-state', id: 'lcd-state', 'aria-hidden': 'true' }),
+            h('button', { class: 'lcd-time', id: 'lcd-time', title: 'Show elapsed / remaining time', onclick: toggleTimeMode }),
+            h('canvas', { class: 'vis', id: 'viz', title: 'Tap to change the visualizer', onclick: cycleVisMode })),
+          h('div', { class: 'lcd-right' },
+            h('div', { class: 'marquee', id: 'marquee' }),
+            h('div', { class: 'lcd-info' },
+              h('span', { class: 'lcd-box', id: 'lcd-kbps' }), h('span', {}, 'kbps'),
+              h('span', { class: 'lcd-box', id: 'lcd-fmt' }),
+              h('span', { class: 'lcd-tag', id: 'lcd-src' })),
+            h('div', { class: 'lcd-flags' },
+              h('span', { id: 'flag-shuf' }, 'SHUF'),
+              h('span', { id: 'flag-rep' }, 'REP'),
+              h('span', { id: 'flag-vis' }, 'VIS')))),
+        seek,
+        h('div', { class: 'transport' },
+          deckButton('prev', 'Previous', () => player.prev()),
+          deckButton('play', 'Play', () => (player.playing ? null : player.toggle()), 'btn-play'),
+          deckButton('pause', 'Pause', () => (player.playing ? player.toggle() : null), 'btn-pause'),
+          deckButton('stop', 'Stop', () => player.stop()),
+          deckButton('next', 'Next', () => player.next()),
+          deckButton('eject', 'Open library', () => { closeFull(); location.hash = hashFor.home(); }),
+          h('span', { class: 'spacer' }),
+          deckButton('shuffle', 'Shuffle', () => player.toggleShuffle(), 'btn-shuffle'),
+          deckButton('repeat', 'Repeat', () => player.cycleRepeat(), 'btn-repeat')),
+        h('div', { class: 'deck-row' },
+          h('span', { class: 'vol-label' }, 'VOL'), vol,
+          h('span', { class: 'deck-save', id: 'deck-save' })))),
+    h('div', { class: 'window playlist' },
+      h('div', { class: 'titlebar' },
+        h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' })),
+      h('ol', { class: 'pl', id: 'pl' }),
+      h('div', { class: 'pl-foot', id: 'pl-foot' })));
+}
+
+function setLcd(el, text) {
+  if (lcdCache.get(el) === text) return;
+  lcdCache.set(el, text);
+  el.innerHTML = lcdDigits(text);
+}
+
+function setMarquee(text) {
+  const box = $('#marquee');
+  if (box.dataset.text === text) return;
+  box.dataset.text = text;
+  box.classList.remove('scroll');
+  box.replaceChildren(h('span', { class: 'marquee-inner' }, text));
+  // Scroll only when the text doesn't fit, Winamp-style, with a separator between loops.
+  requestAnimationFrame(() => {
+    const inner = box.firstChild;
+    if (!inner || inner.scrollWidth <= box.clientWidth) return;
+    const loop = `${text}  ***  `;
+    inner.textContent = loop + loop;
+    inner.style.animationDuration = `${Math.max(6, loop.length * 0.22)}s`;
+    box.classList.add('scroll');
+  });
 }
 
 function updatePlayerUi() {
   const t = player.current;
+  document.body.classList.toggle('has-track', Boolean(t));
   mini.hidden = !t;
-  document.body.classList.toggle('has-mini', Boolean(t));
-  if (!t) return;
-  const sub = player.loading ? 'Loading…' : player.error ? player.error.message : t.folder;
-  const hue = hueOf(t.folder || t.name);
-  $('#mini-art').style.setProperty('--hue', hue);
-  $('#mini-title').textContent = t.name;
-  $('#mini-sub').textContent = sub;
-  $('#mini-sub').classList.toggle('error', Boolean(player.error));
-  const playIcon = player.playing ? icons.pause : icons.play;
-  const playLabel = player.playing ? 'Pause' : 'Play';
-  for (const id of ['#mini-play', '#full-play']) {
-    $(id).innerHTML = playIcon;
-    $(id).setAttribute('aria-label', playLabel);
-  }
-  $('#full-title').textContent = t.name;
-  $('#full-sub').textContent = sub;
-  full.style.setProperty('--hue', hue);
-  $('#btn-shuffle').classList.toggle('on', store.settings.shuffle);
-  const rep = store.settings.repeat;
-  $('#btn-repeat').innerHTML = rep === 'one' ? icons.repeatOne : icons.repeat;
-  $('#btn-repeat').classList.toggle('on', rep !== 'off');
-  $('#btn-repeat').title = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' }[rep];
-  $('#full-save').replaceChildren(...[saveButton(t)].filter(Boolean));
 
-  const upNext = player.upNext.slice(0, 50);
-  $('#upnext').replaceChildren(...upNext.map((track, i) =>
-    h('li', { class: 'row' },
-      h('button', { class: 'row-main', onclick: () => player.jumpAhead(i) },
-        h('span', { class: 'row-text' },
-          h('span', { class: 'row-title' }, track.name),
-          h('span', { class: 'row-sub' }, track.folder))))));
-  if (!upNext.length) {
-    $('#upnext').append(h('li', { class: 'muted pad' },
-      rep === 'all' ? 'The list starts over after this track.' : 'Nothing after this track.'));
+  const s = store.settings;
+  const status = !t ? 'stopped' : player.loading ? 'loading' : player.playing ? 'playing' : 'paused';
+  $('#lcd-state').dataset.state = status;
+  $('#btn-play').classList.toggle('on', status === 'playing');
+  $('#btn-pause').classList.toggle('on', status === 'paused' && player.audio.currentTime > 0);
+  $('#mini-play').innerHTML = player.playing ? icons.pause : icons.play;
+  $('#mini-play').setAttribute('aria-label', player.playing ? 'Pause' : 'Play');
+  $('#btn-shuffle').classList.toggle('on', s.shuffle);
+  $('#btn-repeat').innerHTML = s.repeat === 'one' ? icons.repeatOne : icons.repeat;
+  $('#btn-repeat').classList.toggle('on', s.repeat !== 'off');
+  $('#btn-repeat').title = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' }[s.repeat];
+  $('#flag-shuf').classList.toggle('lit', s.shuffle);
+  $('#flag-rep').classList.toggle('lit', s.repeat !== 'off');
+  $('#flag-rep').textContent = s.repeat === 'one' ? 'REP1' : 'REP';
+  $('#flag-vis').classList.toggle('lit', s.visMode !== 'off');
+
+  if (!t) {
+    setMarquee('MUSIC BOX  ·  pick a folder and press play');
+    $('#lcd-kbps').textContent = '';
+    $('#lcd-fmt').textContent = '';
+    $('#lcd-src').textContent = '';
+    $('#deck-save').replaceChildren();
+  } else {
+    const qi = player.queueIndex;
+    const what = player.loading ? 'Loading…' : player.error ? player.error.message : `${t.name}  —  ${t.folder}`;
+    setMarquee(`${qi + 1}. ${what}`);
+    $('#mini-title').textContent = t.name;
+    $('#mini-sub').textContent = player.loading ? 'Loading…' : player.error ? player.error.message : t.folder;
+    $('#mini-sub').classList.toggle('error', Boolean(player.error));
+    const dur = player.audio.duration;
+    $('#lcd-kbps').textContent = t.size && Number.isFinite(dur) && dur > 0 ? Math.round((t.size * 8) / dur / 1000) : '--';
+    $('#lcd-fmt').textContent = extOf(t.fileName).toUpperCase().slice(0, 4);
+    $('#lcd-src').textContent = store.savedIds.has(t.id) ? 'SAVED' : 'STREAM';
+    $('#deck-save').replaceChildren(...[saveButton(t)].filter(Boolean));
   }
+  renderPlaylist();
   updateTime();
+}
+
+function renderPlaylist() {
+  const pl = $('#pl');
+  const tracks = player.queue;
+  if (shownQueue !== tracks) {
+    shownQueue = tracks;
+    shownTrackId = null;
+    const shown = tracks.slice(0, 1000);
+    pl.replaceChildren(...shown.map((track, i) =>
+      h('li', {},
+        h('button', { class: 'pl-row', title: track.folder, onclick: () => player.playQueueIndex(i) },
+          h('span', { class: 'pl-num' }, `${i + 1}.`),
+          h('span', { class: 'pl-name' }, track.name)))));
+    if (!tracks.length) pl.append(h('li', { class: 'pl-empty' }, 'Playlist is empty. Open a folder and press Play.'));
+  }
+  const qi = player.queueIndex;
+  const id = player.current?.id ?? null;
+  [...pl.children].forEach((li, i) => li.classList.toggle('current', i === qi));
+  if (id !== shownTrackId) {
+    shownTrackId = id;
+    if (deckVisible()) pl.children[qi]?.scrollIntoView({ block: 'nearest' });
+  }
+  $('#pl-foot').textContent = tracks.length
+    ? `${qi + 1} / ${tracks.length}${tracks.length > 1000 ? ' (first 1000 shown)' : ''}${store.settings.shuffle ? ' · shuffled' : ''}`
+    : '0 tracks';
 }
 
 function updateTime() {
   const a = player.audio;
   const dur = Number.isFinite(a.duration) ? a.duration : 0;
-  $('#mini-bar').style.width = dur ? `${(a.currentTime / dur) * 100}%` : '0%';
-  if (full.hidden) return;
+  const cur = player.current ? a.currentTime : 0;
+  const remaining = store.settings.timeMode === 'remaining' && dur > 0;
+  const text = lcdTime(remaining ? dur - cur : cur, remaining);
+  setLcd($('#mini-time'), text);
+  $('#mini-bar').style.width = dur ? `${(cur / dur) * 100}%` : '0%';
+  if (!deckVisible()) return;
+  setLcd($('#lcd-time'), text);
   const seek = $('#seek');
   seek.max = dur || 1;
-  if (!seek.dataset.dragging) {
-    seek.value = a.currentTime;
-    $('#t-cur').textContent = fmtTime(a.currentTime);
+  if (!seek.dataset.dragging) seek.value = cur;
+  seek.style.setProperty('--fill', `${dur ? (cur / dur) * 100 : 0}%`);
+}
+
+function toggleTimeMode() {
+  store.setSetting('timeMode', store.settings.timeMode === 'remaining' ? 'elapsed' : 'remaining');
+  updateTime();
+}
+
+function setVisMode(mode) {
+  const wasOff = store.settings.visMode === 'off';
+  store.setSetting('visMode', mode);
+  if (mode !== 'off') {
+    visualizer.attach(player.audio);
+    if (wasOff) toast('Visualizer on. If music stops in the background on your phone, turn it off.');
   }
-  $('#t-dur').textContent = fmtTime(dur);
+  updatePlayerUi();
+}
+
+function cycleVisMode() {
+  setVisMode({ off: 'bars', bars: 'scope', scope: 'off' }[store.settings.visMode] || 'bars');
+}
+
+/** Run the visualizer only while the deck is on screen. */
+function syncViz() {
+  if (deckVisible() && !stopViz) {
+    if (store.settings.visMode !== 'off') visualizer.attach(player.audio);
+    stopViz = visualizer.run($('#viz'), () => store.settings.visMode);
+  } else if (!deckVisible() && stopViz) {
+    stopViz();
+    stopViz = null;
+  }
 }
 
 function openFull() {
-  full.hidden = false;
   document.body.classList.add('full-open');
-  if (store.settings.visualizer) visualizer.attach(player.audio);
-  stopViz?.();
-  stopViz = visualizer.run($('#viz'), hueOf(player.current?.folder || player.current?.name || ''));
+  syncViz();
+  shownTrackId = null;
   updatePlayerUi();
 }
 
 function closeFull() {
-  full.hidden = true;
   document.body.classList.remove('full-open');
-  stopViz?.();
-  stopViz = null;
+  syncViz();
 }
 
 // ---------------------------------------------------------------- wiring
@@ -574,11 +755,8 @@ function closeFull() {
 player.addEventListener('change', () => {
   updatePlayerUi();
   refreshRows();
-  if (!full.hidden && stopViz) {
-    stopViz();
-    stopViz = visualizer.run($('#viz'), hueOf(player.current?.folder || player.current?.name || ''));
-  }
 });
+wide.addEventListener('change', () => { syncViz(); updatePlayerUi(); });
 player.addEventListener('time', updateTime);
 player.addEventListener('auth-required', (e) => {
   const p = getProvider(e.detail.providerId);
@@ -604,7 +782,16 @@ document.addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey) return;
   if (e.code === 'Space' && player.current) { e.preventDefault(); player.toggle(); }
-  if (e.key === 'Escape' && !full.hidden) closeFull();
+  if (e.key === 'Escape') closeFull();
+  // Classic keyboard layout: z x c v b = previous, play, pause, stop, next.
+  const keys = {
+    z: () => player.prev(),
+    x: () => !player.playing && player.toggle(),
+    c: () => player.playing && player.toggle(),
+    v: () => player.stop(),
+    b: () => player.next(),
+  };
+  keys[e.key.toLowerCase()]?.();
 });
 
 function updateOnline() {
@@ -618,6 +805,7 @@ window.addEventListener('hashchange', render);
 async function start() {
   $('#back').innerHTML = icons.back;
   $('#settings-link').innerHTML = icons.settings;
+  applySkin(currentSkin());
   buildPlayerUi();
   await store.init();
   try {
@@ -631,6 +819,7 @@ async function start() {
   }
   updateOnline();
   updatePlayerUi();
+  syncViz();
   render();
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker failed', err));

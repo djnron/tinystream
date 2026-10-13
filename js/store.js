@@ -7,7 +7,10 @@ const SETTINGS_KEY = 'mb.settings';
 const DEFAULTS = {
   allowDownloads: false, // master switch: may this app store music on the device at all?
   saveOnPlay: false, // when allowed, keep a copy of every track as it plays
-  visualizer: false,
+  visMode: 'off', // 'off' | 'bars' | 'scope' — off by default, see visualizer.js
+  timeMode: 'elapsed', // 'elapsed' | 'remaining'
+  skin: 'deck98',
+  customSkin: null, // a skin loaded from a file, see skins.js
   repeat: 'all', // 'off' | 'all' | 'one'
   shuffle: false,
   volume: 1,
@@ -18,7 +21,10 @@ const emit = (type, detail) => events.dispatchEvent(new CustomEvent(type, { deta
 
 function loadSettings() {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    if (saved.visualizer === true && !saved.visMode) saved.visMode = 'bars'; // from v1
+    delete saved.visualizer;
+    return { ...DEFAULTS, ...saved };
   } catch {
     return { ...DEFAULTS };
   }

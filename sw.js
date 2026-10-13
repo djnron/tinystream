@@ -2,7 +2,7 @@
 // (only when the user allows downloads), never in this cache.
 // Bump VERSION when shipping changes so clients pick them up.
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `music-box-${VERSION}`;
 const SHELL = [
   './',
@@ -13,7 +13,9 @@ const SHELL = [
   './js/app.js',
   './js/downloads.js',
   './js/icons.js',
+  './js/lcd.js',
   './js/player.js',
+  './js/skins.js',
   './js/store.js',
   './js/util.js',
   './js/visualizer.js',

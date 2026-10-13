@@ -10,6 +10,8 @@ export const icons = {
   shuffle: svg('<path d="M17 3l4 4-4 4V8h-2.3l-3.2 4 3.2 4H17v-3l4 4-4 4v-3h-3.3l-3.7-4.6L6.3 18H3v-2h2.3l3.2-4-3.2-4H3V6h3.3L10 10.6 13.7 6H17V3z"/>'),
   repeat: svg('<path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>'),
   repeatOne: svg('<path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/><path d="M13 15V9h-1l-2 1v1h1.5v4H13z"/>'),
+  stop: svg('<rect x="6" y="6" width="12" height="12" rx="1"/>'),
+  eject: svg('<path d="M12 5 4.5 14h15L12 5zM4.5 16.5h15V19h-15z"/>'),
   folder: svg('<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11z"/>'),
   note: svg('<path d="M10 17.5a3 3 0 1 1-2-2.83V5.5a1 1 0 0 1 .76-.97l9-2.25A1 1 0 0 1 19 3.25V15a3 3 0 1 1-2-2.83V6.03l-7 1.75v9.72z"/>'),
   download: svg('<path d="M11 4a1 1 0 1 1 2 0v8.6l2.8-2.8a1 1 0 1 1 1.4 1.4l-4.5 4.5a1 1 0 0 1-1.4 0l-4.5-4.5a1 1 0 1 1 1.4-1.4l2.8 2.8V4zM5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1z"/>'),

@@ -100,9 +100,21 @@ export class Player extends EventTarget {
     this.#playAt(this.pos - 1);
   }
 
-  /** Jump to a track in the "up next" list (offset 0 = the next one). */
-  jumpAhead(offset) {
-    this.#playAt(this.pos + 1 + offset);
+  /** Play a track by its position in the queue's original order (as the playlist shows it). */
+  playQueueIndex(queueIndex) {
+    const pos = this.order.indexOf(queueIndex);
+    if (pos >= 0) this.#playAt(pos);
+  }
+
+  stop() {
+    this.audio.pause();
+    if (this.audio.src) this.audio.currentTime = 0;
+    this.#emit();
+  }
+
+  /** Index in `queue` of the track that's playing. */
+  get queueIndex() {
+    return this.pos >= 0 ? this.order[this.pos] : -1;
   }
 
   seek(seconds) {

@@ -1,6 +1,7 @@
 // Skins: every color, bevel, display and font in the app comes from these tokens (CSS custom
-// properties). A skin is just a name plus a set of token values, so anyone can make one: download
-// the template from Settings, edit the values, and load the file back in.
+// properties), and the arrangement of the player comes from a layout (see LAYOUT). A skin is a name
+// plus tokens plus a layout, so anyone can make one: download the template from Settings, edit the
+// values, and load the file back in.
 
 /** Every token a skin can set, with the "Deck 98" value as the fallback. */
 export const TOKENS = {
@@ -41,7 +42,38 @@ export const TOKENS = {
   'list-select': '#1f3bd1',
 };
 
-const skin = (id, name, tokens) => ({ id, name, tokens });
+/**
+ * Layout options. Each one is applied as a data-* attribute on <html> and styled in css/app.css.
+ * The first value of each list is the default.
+ */
+export const LAYOUT = {
+  deck: ['classic', 'hero', 'rack', 'boombox', 'cassette', 'strip'], // how the player is arranged
+  buttons: ['bevel', 'round', 'pill', 'flat', 'keys', 'labels'], // transport button shape
+  titlebar: ['grips', 'center', 'left', 'slim'],
+  lcd: ['sunken', 'pill', 'crt', 'dots', 'outline'], // the screen's frame and texture
+  seek: ['trough', 'line', 'led', 'thick'],
+  frame: ['bevel', 'outline', 'soft', 'double'], // window chrome
+  vis: ['bars', 'mirror', 'blocks', 'dots'], // how the spectrum is drawn
+  list: ['plain', 'zebra', 'compact'], // playlist rows
+  side: ['left', 'right'], // which side of the library the player sits on (wide screens)
+  order: ['deck-first', 'list-first'], // player above or below the playlist
+};
+export const WIDTH_RANGE = [300, 460]; // player column width on wide screens, px
+
+export const DEFAULT_LAYOUT = { ...Object.fromEntries(Object.entries(LAYOUT).map(([k, v]) => [k, v[0]])), width: 380 };
+
+/** Keeps known layout keys with allowed values; anything else falls back to the default. */
+export function validateLayout(input = {}) {
+  const out = { ...DEFAULT_LAYOUT };
+  for (const [key, options] of Object.entries(LAYOUT)) {
+    if (options.includes(input[key])) out[key] = input[key];
+  }
+  const w = Math.round(Number(input.width));
+  if (Number.isFinite(w)) out.width = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], w));
+  return out;
+}
+
+const skin = (id, name, tokens, layout = {}) => ({ id, name, tokens, layout: validateLayout(layout) });
 
 export const SKINS = [
   skin('deck98', 'Deck 98', {}),
@@ -56,7 +88,7 @@ export const SKINS = [
     'lcd-bg': '#0d0802', 'lcd-text': '#ffb000', 'lcd-dim': '#2b1d05', 'lcd-glow': '0 0 8px #ffb000aa',
     'vis-low': '#a86a00', 'vis-high': '#ffd36b', 'vis-peak': '#fff1c9',
     'list-bg': '#0d0802', 'list-text': '#ffb000', 'list-current': '#fff1c9', 'list-select': '#5a3a00',
-  }),
+  }, { deck: 'strip', buttons: 'labels', titlebar: 'left', lcd: 'crt', seek: 'led', frame: 'outline', vis: 'blocks', list: 'compact', width: 420 }),
 
   skin('neon', 'Neon Arcade', {
     bg: '#07040f', text: '#f3e9ff', muted: '#9a86c4', accent: '#ff2bd6', 'accent-text': '#14001a',
@@ -68,7 +100,7 @@ export const SKINS = [
     'lcd-bg': '#05010c', 'lcd-text': '#2be3ff', 'lcd-dim': '#0b1d2a', 'lcd-glow': '0 0 10px #2be3ffcc',
     'vis-low': '#7a2bff', 'vis-high': '#ff2bd6', 'vis-peak': '#2be3ff',
     'list-bg': '#05010c', 'list-text': '#c9a8ff', 'list-current': '#2be3ff', 'list-select': '#3a0f5c',
-  }),
+  }, { deck: 'hero', buttons: 'round', titlebar: 'center', lcd: 'outline', seek: 'line', frame: 'soft', vis: 'mirror', side: 'right' }),
 
   skin('vapor', 'Vaporwave', {
     bg: '#2b1640', text: '#fff0fb', muted: '#d6a8d9', accent: '#7ff5e8', 'accent-text': '#24123a',
@@ -81,7 +113,7 @@ export const SKINS = [
     'lcd-bg': '#1a0b2e', 'lcd-text': '#05ffa1', 'lcd-dim': '#2b2048', 'lcd-glow': '0 0 8px #05ffa199',
     'vis-low': '#01cdfe', 'vis-high': '#ff71ce', 'vis-peak': '#fffb96',
     'list-bg': '#1a0b2e', 'list-text': '#ff9de2', 'list-current': '#05ffa1', 'list-select': '#5a1f7a',
-  }),
+  }, { deck: 'cassette', buttons: 'pill', titlebar: 'center', lcd: 'pill', seek: 'thick', frame: 'soft', vis: 'bars', list: 'zebra' }),
 
   skin('steel', 'Brushed Steel', {
     bg: '#d9dce1', text: '#1d2026', muted: '#5d636e', accent: '#1e6fd9', 'accent-text': '#ffffff',
@@ -93,7 +125,7 @@ export const SKINS = [
     'lcd-bg': '#0b1a2e', 'lcd-text': '#8fd3ff', 'lcd-dim': '#14283f', 'lcd-glow': '0 0 6px #8fd3ff88',
     'vis-low': '#2f8cff', 'vis-high': '#8fd3ff', 'vis-peak': '#ffffff',
     'list-bg': '#f7f8fa', 'list-text': '#1d2026', 'list-current': '#1e6fd9', 'list-select': '#c9dcf7',
-  }),
+  }, { deck: 'rack', buttons: 'keys', titlebar: 'grips', lcd: 'dots', seek: 'trough', frame: 'bevel', vis: 'blocks', width: 400 }),
 
   skin('bubblegum', 'Bubblegum', {
     bg: '#fff3f8', text: '#4a1f3a', muted: '#a0668a', accent: '#ff4fa3', 'accent-text': '#ffffff',
@@ -107,7 +139,7 @@ export const SKINS = [
     'font-lcd': '"Comic Sans MS", "Chalkboard SE", sans-serif',
     'vis-low': '#b38cff', 'vis-high': '#ff4fa3', 'vis-peak': '#7a2b5a',
     'list-bg': '#fff9fc', 'list-text': '#7a2b5a', 'list-current': '#e0157a', 'list-select': '#ffd6ea',
-  }),
+  }, { deck: 'boombox', buttons: 'round', titlebar: 'center', lcd: 'pill', seek: 'thick', frame: 'outline', vis: 'dots', list: 'zebra', order: 'list-first' }),
 
   skin('clean', 'Clean (no retro)', {
     bg: '#15131d', text: '#f1eff7', muted: '#a7a2b8', accent: '#a58bff', 'accent-text': '#15131d',
@@ -120,7 +152,7 @@ export const SKINS = [
     'font-lcd': 'system-ui, sans-serif',
     'vis-low': '#6a4ee0', 'vis-high': '#a58bff', 'vis-peak': '#f1eff7',
     'list-bg': '#1f1c2a', 'list-text': '#d9d4ea', 'list-current': '#a58bff', 'list-select': '#2f2a44',
-  }),
+  }, { deck: 'hero', buttons: 'flat', titlebar: 'slim', lcd: 'sunken', seek: 'line', frame: 'soft', vis: 'mirror', list: 'compact', width: 340 }),
 ];
 
 // ---------- custom skin files ----------
@@ -143,7 +175,7 @@ export function parseSkinFile(text) {
     throw new Error('A skin file needs a "tokens" object — download the template to see the format');
   }
   const name = String(data.name || 'My skin').slice(0, MAX_NAME);
-  return { id: 'custom', name, tokens: validateTokens(data.tokens) };
+  return { id: 'custom', name, tokens: validateTokens(data.tokens), layout: validateLayout(data.layout) };
 }
 
 /** Keeps known tokens only and rejects values that could load anything (no url()). */
@@ -163,8 +195,11 @@ export function validateTokens(input) {
 export function skinTemplate(base) {
   return JSON.stringify({
     name: `${base.name} (my copy)`,
-    about: 'Music Box skin. Edit any value (CSS colors, gradients, fonts, sizes), then load it from Settings → Skin.',
+    about: 'Music Box skin. Edit any token (CSS colors, gradients, fonts, sizes) and pick layout options '
+      + 'from the lists in "layoutOptions", then load it from Settings → Skin.',
     tokens: { ...TOKENS, ...base.tokens },
+    layout: validateLayout(base.layout),
+    layoutOptions: { ...LAYOUT, width: `${WIDTH_RANGE[0]}-${WIDTH_RANGE[1]}` },
   }, null, 2);
 }
 
@@ -174,6 +209,9 @@ export function applySkin(s) {
   const root = document.documentElement;
   for (const [k, v] of Object.entries(all)) root.style.setProperty(`--${k}`, v);
   root.dataset.skin = s.id;
+  const layout = validateLayout(s.layout);
+  for (const key of Object.keys(LAYOUT)) root.dataset[key] = layout[key];
+  root.style.setProperty('--deck-w', `${layout.width}px`);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', solidColor(all.bg));
   window.dispatchEvent(new Event('skinchange'));
 }

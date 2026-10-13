@@ -21,9 +21,11 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
   spectrum or oscilloscope visualizer, beveled transport buttons, and a playlist window. Seven built-in
   skins (Deck 98, Amber Terminal, Neon Arcade, Vaporwave, Brushed Steel, Bubblegum, Clean). You can
   also load your own skin file.
-- **🎲 Skin generator.** One button (top bar, or Settings → Skin) makes a brand-new skin from the
-  palettes of real classic skins in the [Winamp Skin Museum](https://skins.webamp.org/). Every
-  generated skin gets a name and credits the museum skins it was inspired by.
+- **🎲 Skin generator.** One button (top bar, or Settings → Skin) makes a brand-new skin, with new
+  colors and a new layout. Colors come from the palettes of real classic skins in the
+  [Winamp Skin Museum](https://skins.webamp.org/). The arrangement, buttons, screen, frame and
+  visualizer are rolled fresh, so no two presses in a row look or sit the same. Every generated skin
+  gets a name and credits the museum skins it was inspired by.
 - **One layout for every screen.** On wide screens the deck and playlist sit in a column next to the
   library. On phones there's a compact bar at the bottom that opens the deck full screen.
 - Works offline for saved music and installs to the home screen or desktop.
@@ -93,11 +95,29 @@ to commit `config.js`.
 
 ## Skins
 
-Every color, bevel, gradient and font comes from a set of skin tokens (CSS custom properties) listed in
-[`js/skins.js`](js/skins.js). To make your own:
+A skin has two parts, both defined in [`js/skins.js`](js/skins.js):
 
-1. **Settings → Skin → Download skin template.** You get a JSON file with every token, starting from the
-   skin you're using.
+- **Tokens:** every color, bevel, gradient and font, as CSS custom properties.
+- **A layout:** options applied as `data-*` attributes on `<html>`, which `css/app.css` turns into
+  different arrangements:
+
+| Layout key | Options |
+| --- | --- |
+| `deck` | `classic` · `hero` (big centered time) · `rack` (controls in a column) · `boombox` (speakers that thump with the beat) · `cassette` (reels that spin while playing) · `strip` (visualizer behind the display) |
+| `buttons` | `bevel` · `round` · `pill` · `flat` · `keys` (chunky 3D keys) · `labels` (PLAY / STOP text instead of icons) |
+| `titlebar` | `grips` · `center` · `left` · `slim` |
+| `lcd` | `sunken` · `pill` · `crt` (scanlines) · `dots` (dot matrix) · `outline` |
+| `seek` | `trough` · `line` · `led` (segmented) · `thick` |
+| `frame` | `bevel` · `outline` (hard shadow) · `soft` · `double` |
+| `vis` | `bars` · `mirror` · `blocks` · `dots` |
+| `list` | `plain` · `zebra` · `compact` |
+| `side`, `order`, `width` | player left or right of the library, playlist above or below it, column width 300–460 px |
+
+Every combination has been checked to fit at phone width and on desktop. The built-in skins each use
+a different layout. To make your own:
+
+1. **Settings → Skin → Download skin template.** You get a JSON file with every token and the layout,
+   starting from the skin you're using. The allowed layout values are listed in `layoutOptions`.
 2. Edit the values. Any CSS color, gradient, `px` size or font list works.
 3. **Load skin file…** applies it, and it stays selected.
 
@@ -118,8 +138,10 @@ Only colors are stored, no skin artwork. Each press of 🎲 (`js/skin-generator.
 2. Sometimes rotates all the hues, slightly or dramatically.
 3. Rolls the style: deck gradient (flat, shaded, brushed, diagonal or split), title bar style,
    corner radius, fonts and LCD glow.
-4. Builds a dark or light page to match the deck.
-5. Fixes contrast so everything stays readable: at least 4.5:1 for the LCD, playlist and title text,
+4. Rolls a whole layout: arrangement, buttons, title bar, screen, seek bar, frame, visualizer,
+   playlist, side and width. The arrangement and button style never repeat the previous skin's.
+5. Builds a dark or light page to match the deck.
+6. Fixes contrast so everything stays readable: at least 4.5:1 for the LCD, playlist and title text,
    and 3:1 for button icons and accents.
 
 It's tested over 10,000 random skins. Undo is in the toast. To keep a generated skin, use Download skin

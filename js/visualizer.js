@@ -72,7 +72,9 @@ export function run(canvas, getMode) {
       return;
     }
 
-    // Bars: 3-pixel-wide columns with a 1-pixel gap, log-spaced over the spectrum.
+    // Spectrum: 3-pixel-wide columns with a 1-pixel gap, log-spaced over the spectrum. The skin
+    // picks how they're drawn: solid bars, mirrored from the middle, LED blocks, or just dots.
+    const style = document.documentElement.dataset.vis || 'bars';
     const bars = Math.max(4, Math.floor((w + 1) / 4));
     if (live) analyser.getByteFrequencyData(freq);
     const usable = freq ? Math.floor(freq.length * 0.7) : 0;
@@ -91,16 +93,35 @@ export function run(canvas, getMode) {
       levels[i] = Math.max(v, (levels[i] || 0) - 0.04);
       const barH = Math.round(levels[i] * h);
       const x = i * 4;
+      peaks[i] = Math.max(barH, (peaks[i] || 0) - 0.25);
+      const peakY = h - Math.ceil(peaks[i]) - 1;
       g.fillStyle = colors.dim;
+      if (style === 'mirror') {
+        const half = Math.round(barH / 2);
+        const mid = Math.floor(h / 2);
+        g.fillRect(x, mid, 3, 1);
+        if (half > 0) {
+          g.fillStyle = grad;
+          g.fillRect(x, mid - half, 3, half * 2);
+        }
+        continue;
+      }
       g.fillRect(x, h - 1, 3, 1);
-      if (barH > 0) {
+      if (style === 'blocks') {
+        g.fillStyle = grad;
+        for (let y = 0; y < barH; y += 2) g.fillRect(x, h - 1 - y, 3, 1);
+      } else if (style === 'dots') {
+        if (barH > 0) {
+          g.fillStyle = colors.high;
+          g.fillRect(x + 1, h - barH, 1, 1);
+        }
+      } else if (barH > 0) {
         g.fillStyle = grad;
         g.fillRect(x, h - barH, 3, barH);
       }
-      peaks[i] = Math.max(barH, (peaks[i] || 0) - 0.25);
       if (peaks[i] >= 1) {
         g.fillStyle = colors.peak;
-        g.fillRect(x, h - Math.ceil(peaks[i]) - 1, 3, 1);
+        g.fillRect(x, peakY, 3, 1);
       }
     }
   };

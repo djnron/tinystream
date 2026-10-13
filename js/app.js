@@ -460,6 +460,12 @@ function useSkin(sk) {
   applySkin(sk);
 }
 
+// The player's title bar shows the skin's name, like the old skinned players did.
+window.addEventListener('skinchange', () => {
+  const label = document.getElementById('deck-label');
+  if (label) label.textContent = currentSkin().name.toUpperCase();
+});
+
 /** A tiny preview of the skin, drawn with its own tokens. */
 function skinSwatch(sk) {
   const el = h('button', {
@@ -470,7 +476,8 @@ function skinSwatch(sk) {
   h('span', { class: 'sw-deck' },
     h('span', { class: 'sw-title' }),
     h('span', { class: 'sw-lcd', html: lcdDigits(' 1:23') })),
-  h('span', { class: 'sw-name' }, sk.name));
+  h('span', { class: 'sw-name' }, sk.name),
+  h('span', { class: 'sw-layout' }, `${sk.layout?.deck || 'classic'} · ${sk.layout?.buttons || 'bevel'}`));
   for (const [k, v] of Object.entries({ ...TOKENS, ...sk.tokens })) el.style.setProperty(`--${k}`, v);
   return el;
 }
@@ -483,7 +490,7 @@ async function generateAndApply() {
   generating = true;
   const before = { skin: store.settings.skin, customSkin: store.settings.customSkin };
   try {
-    const sk = await generateSkin();
+    const sk = await generateSkin({ previous: currentSkin().layout });
     store.setSetting('customSkin', sk);
     useSkin(sk);
     const from = sk.inspiredBy.map((src) => src.name).join(' + ');
@@ -576,8 +583,11 @@ const lcdCache = new Map(); // element -> last text drawn, so digits only re-ren
 
 const deckVisible = () => wide.matches || document.body.classList.contains('full-open');
 
-function deckButton(name, label, onclick, id) {
-  return h('button', { class: 'deck-btn', id, 'aria-label': label, title: label, html: icons[name], onclick });
+/** Transport button: an icon, plus a text label that "labels" skins show instead. */
+function deckButton(name, label, onclick, id, text) {
+  return h('button', { class: 'deck-btn', id, 'aria-label': label, title: label, onclick },
+    h('span', { class: 'btn-ico', html: icons[name] }),
+    h('span', { class: 'btn-txt' }, text));
 }
 
 function buildPlayerUi() {
@@ -603,35 +613,39 @@ function buildPlayerUi() {
   full.replaceChildren(
     h('div', { class: 'window deck' },
       h('div', { class: 'titlebar' },
-        h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'MUSIC BOX'), h('span', { class: 'tb-grip' }),
+        h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label', id: 'deck-label' }, 'MUSIC BOX'), h('span', { class: 'tb-grip' }),
         h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull })),
+      // Every part of the deck is a direct grid item, so skins can arrange them freely (see the
+      // [data-deck] rules in css/app.css). Speakers and reels only show in the layouts that use them.
       h('div', { class: 'deck-body' },
+        h('span', { class: 'speaker spk-l', 'aria-hidden': 'true' }),
         h('div', { class: 'lcd screen' },
-          h('div', { class: 'lcd-left' },
-            h('span', { class: 'lcd-state', id: 'lcd-state', 'aria-hidden': 'true' }),
-            h('button', { class: 'lcd-time', id: 'lcd-time', title: 'Show elapsed / remaining time', onclick: toggleTimeMode }),
-            h('canvas', { class: 'vis', id: 'viz', title: 'Tap to change the visualizer', onclick: cycleVisMode })),
-          h('div', { class: 'lcd-right' },
-            h('div', { class: 'marquee', id: 'marquee' }),
-            h('div', { class: 'lcd-info' },
-              h('span', { class: 'lcd-box', id: 'lcd-kbps' }), h('span', {}, 'kbps'),
-              h('span', { class: 'lcd-box', id: 'lcd-fmt' }),
-              h('span', { class: 'lcd-tag', id: 'lcd-src' })),
-            h('div', { class: 'lcd-flags' },
-              h('span', { id: 'flag-shuf' }, 'SHUF'),
-              h('span', { id: 'flag-rep' }, 'REP'),
-              h('span', { id: 'flag-vis' }, 'VIS')))),
+          h('span', { class: 'lcd-state', id: 'lcd-state', 'aria-hidden': 'true' }),
+          h('button', { class: 'lcd-time', id: 'lcd-time', title: 'Show elapsed / remaining time', onclick: toggleTimeMode }),
+          h('span', { class: 'reel reel-l', 'aria-hidden': 'true' }),
+          h('span', { class: 'reel reel-r', 'aria-hidden': 'true' }),
+          h('canvas', { class: 'vis', id: 'viz', title: 'Tap to change the visualizer', onclick: cycleVisMode }),
+          h('div', { class: 'marquee', id: 'marquee' }),
+          h('div', { class: 'lcd-info' },
+            h('span', { class: 'lcd-box', id: 'lcd-kbps' }), h('span', {}, 'kbps'),
+            h('span', { class: 'lcd-box', id: 'lcd-fmt' }),
+            h('span', { class: 'lcd-tag', id: 'lcd-src' })),
+          h('div', { class: 'lcd-flags' },
+            h('span', { id: 'flag-shuf' }, 'SHUF'),
+            h('span', { id: 'flag-rep' }, 'REP'),
+            h('span', { id: 'flag-vis' }, 'VIS'))),
+        h('span', { class: 'speaker spk-r', 'aria-hidden': 'true' }),
         seek,
         h('div', { class: 'transport' },
-          deckButton('prev', 'Previous', () => player.prev()),
-          deckButton('play', 'Play', () => (player.playing ? null : player.toggle()), 'btn-play'),
-          deckButton('pause', 'Pause', () => (player.playing ? player.toggle() : null), 'btn-pause'),
-          deckButton('stop', 'Stop', () => player.stop()),
-          deckButton('next', 'Next', () => player.next()),
-          deckButton('eject', 'Open library', () => { closeFull(); location.hash = hashFor.home(); }),
+          deckButton('prev', 'Previous', () => player.prev(), null, 'PREV'),
+          deckButton('play', 'Play', () => (player.playing ? null : player.toggle()), 'btn-play', 'PLAY'),
+          deckButton('pause', 'Pause', () => (player.playing ? player.toggle() : null), 'btn-pause', 'PAUSE'),
+          deckButton('stop', 'Stop', () => player.stop(), null, 'STOP'),
+          deckButton('next', 'Next', () => player.next(), null, 'NEXT'),
+          deckButton('eject', 'Open library', () => { closeFull(); location.hash = hashFor.home(); }, null, 'EJECT'),
           h('span', { class: 'spacer' }),
-          deckButton('shuffle', 'Shuffle', () => player.toggleShuffle(), 'btn-shuffle'),
-          deckButton('repeat', 'Repeat', () => player.cycleRepeat(), 'btn-repeat')),
+          deckButton('shuffle', 'Shuffle', () => player.toggleShuffle(), 'btn-shuffle', 'SHUF'),
+          deckButton('repeat', 'Repeat', () => player.cycleRepeat(), 'btn-repeat', 'REP')),
         h('div', { class: 'deck-row' },
           h('span', { class: 'vol-label' }, 'VOL'), vol,
           h('span', { class: 'deck-save', id: 'deck-save' })))),
@@ -678,7 +692,9 @@ function updatePlayerUi() {
   $('#mini-play').innerHTML = player.playing ? icons.pause : icons.play;
   $('#mini-play').setAttribute('aria-label', player.playing ? 'Pause' : 'Play');
   $('#btn-shuffle').classList.toggle('on', s.shuffle);
-  $('#btn-repeat').innerHTML = s.repeat === 'one' ? icons.repeatOne : icons.repeat;
+  $('#btn-repeat .btn-ico').innerHTML = s.repeat === 'one' ? icons.repeatOne : icons.repeat;
+  $('#btn-repeat .btn-txt').textContent = s.repeat === 'one' ? 'REP 1' : 'REP';
+  document.documentElement.toggleAttribute('data-playing', player.playing);
   $('#btn-repeat').classList.toggle('on', s.repeat !== 'off');
   $('#btn-repeat').title = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' }[s.repeat];
   $('#flag-shuf').classList.toggle('lit', s.shuffle);
@@ -850,8 +866,8 @@ async function start() {
   $('#settings-link').innerHTML = icons.settings;
   $('#gen-skin').innerHTML = icons.dice;
   $('#gen-skin').addEventListener('click', generateAndApply);
-  applySkin(currentSkin());
   buildPlayerUi();
+  applySkin(currentSkin());
   await store.init();
   try {
     const { dropbox } = providers;

@@ -1,9 +1,11 @@
 // One-button skin generator. It starts from the palette of a real classic skin from the Winamp Skin
 // Museum (see skin-corpus.js), sometimes borrows the screen colors from a second skin, nudges the
 // hues, then maps everything onto our skin tokens. Contrast is checked and fixed so the result is
-// always readable, and the style choices (gradients, corners, fonts, glow) are rolled at random.
+// always readable. The style (gradients, corners, fonts, glow) and the whole player layout (deck
+// arrangement, buttons, title bar, screen, seek bar, frame, visualizer, playlist, side, width) are
+// rolled at random too, so every skin looks and is arranged differently.
 
-import { validateTokens } from './skins.js';
+import { LAYOUT, validateLayout, validateTokens, WIDTH_RANGE } from './skins.js';
 
 // ---------- color helpers ----------
 
@@ -120,10 +122,11 @@ function uiFont(name, roll) {
 // ---------- the generator ----------
 
 /**
- * Returns a new skin: { id: 'custom', name, tokens, inspiredBy: [{ name, id }] }.
+ * Returns a new skin: { id: 'custom', name, tokens, layout, inspiredBy: [{ name, id }] }.
+ * Pass the current skin's layout as `previous` so the new one is arranged differently.
  * `rand` can be swapped for a seeded generator.
  */
-export async function generateSkin(rand = Math.random) {
+export async function generateSkin({ previous = null, rand = Math.random } = {}) {
   const { CORPUS } = await import('./skin-corpus.js');
   const pick = (list) => list[Math.floor(rand() * list.length)];
   const a = pick(CORPUS);
@@ -223,9 +226,24 @@ export async function generateSkin(rand = Math.random) {
     'list-select': listSelect,
   };
 
+  const layout = rollLayout(rand, pick, previous);
   const name = `${pick(ADJECTIVES)} ${pick(NOUNS)}${pick(SUFFIXES)}`;
   const inspiredBy = [a, b].filter((s, i, all) => all.indexOf(s) === i).map((s) => ({ name: s.name, id: s.id }));
-  return { id: 'custom', name, tokens: validateTokens(tokens), inspiredBy };
+  return { id: 'custom', name, tokens: validateTokens(tokens), layout, inspiredBy };
+}
+
+/** A random player layout. Each option is equally likely except side and order, which lean default. */
+function rollLayout(rand, pick, previous) {
+  const layout = Object.fromEntries(Object.entries(LAYOUT).map(([key, options]) => [key, pick(options)]));
+  // Never the same deck arrangement or button style twice in a row.
+  for (const key of ['deck', 'buttons']) {
+    while (previous && layout[key] === previous[key]) layout[key] = pick(LAYOUT[key]);
+  }
+  layout.side = rand() < 0.35 ? 'right' : 'left';
+  layout.order = rand() < 0.25 ? 'list-first' : 'deck-first';
+  const [lo, hi] = WIDTH_RANGE;
+  layout.width = lo + Math.round((rand() * (hi - lo)) / 10) * 10;
+  return validateLayout(layout);
 }
 
 export const museumUrl = (id) => `https://skins.webamp.org/skin/${id}`;

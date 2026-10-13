@@ -71,6 +71,7 @@ const iconSpan = (name, cls = 'ico') => h('span', { class: cls, html: icons[name
 
 /** Per-track save button, shown only when the user allows downloads. */
 function saveButton(track) {
+  if (track.provider === 'local') return null; // already on this device
   if (store.savedIds.has(track.id)) {
     return h('span', { class: 'icon-btn saved', title: 'Saved on this device', html: icons.saved });
   }
@@ -98,7 +99,7 @@ function refreshRows() {
   for (const { el, track } of rows.values()) {
     if (!el.isConnected) continue;
     el.classList.toggle('current', track.id === currentId);
-    el.classList.toggle('unavailable', !navigator.onLine && !store.savedIds.has(track.id));
+    el.classList.toggle('unavailable', !navigator.onLine && track.provider !== 'local' && !store.savedIds.has(track.id));
     const slot = el.querySelector('.row-action');
     slot.replaceChildren(...[saveButton(track)].filter(Boolean));
   }
@@ -134,7 +135,7 @@ function message(title, body, ...actions) {
     actions.length ? h('div', { class: 'actions center' }, actions) : null);
 }
 
-function reconnectButton(p, after = render) {
+function reconnectButton(p, after = render, label = `Reconnect ${p.label}`) {
   return h('button', {
     class: 'btn primary',
     onclick: async () => {
@@ -145,7 +146,7 @@ function reconnectButton(p, after = render) {
         toast(err.message);
       }
     },
-  }, `Reconnect ${p.label}`);
+  }, label);
 }
 
 // ---------------------------------------------------------------- views
@@ -156,22 +157,25 @@ function homeView() {
   const cards = Object.values(providers).map((p) => {
     const configured = p.isConfigured();
     const connected = configured && p.isConnected();
+    const isLocal = p.id === 'local';
     let status;
     let actions;
     if (!configured) {
       status = 'Not set up — add your key in config.js (see README).';
     } else if (connected) {
-      status = 'Connected · read-only access';
+      status = isLocal ? `Playing from “${p.rootName}” · files stay on this device` : 'Connected · read-only access';
       actions = [
         h('a', { class: 'btn primary', href: hashFor.folder(p.id, p.rootId, p.rootName) }, 'Browse'),
-        h('button', { class: 'btn', onclick: () => disconnect(p) }, 'Disconnect'),
+        isLocal && h('button', { class: 'btn', onclick: () => connect(p) }, 'Change folder'),
+        h('button', { class: 'btn', onclick: () => disconnect(p) }, isLocal ? 'Forget' : 'Disconnect'),
       ];
     } else {
-      status = 'Not connected';
-      actions = [h('button', { class: 'btn primary', onclick: () => connect(p) }, `Connect ${p.label}`)];
+      status = isLocal ? 'Play music from a folder on this computer or phone. No account needed.' : 'Not connected';
+      actions = [h('button', { class: 'btn primary', onclick: () => connect(p) },
+        isLocal ? 'Choose a music folder' : `Connect ${p.label}`)];
     }
     return h('section', { class: `card source ${configured ? '' : 'disabled'}` },
-      h('div', { class: 'card-head' }, iconSpan('cloud', `ico badge ${p.id}`),
+      h('div', { class: 'card-head' }, iconSpan(isLocal ? 'folder' : 'cloud', `ico badge ${p.id}`),
         h('div', {}, h('h2', {}, p.label), h('p', { class: 'muted' }, status))),
       actions && h('div', { class: 'actions' }, actions));
   });
@@ -179,15 +183,80 @@ function homeView() {
   const device = store.settings.allowDownloads || store.savedIds.size
     ? h('a', { class: 'card source link-card', href: hashFor.saved() },
       h('div', { class: 'card-head' }, iconSpan('phone', 'ico badge device'),
-        h('div', {}, h('h2', {}, 'On this device'),
+        h('div', {}, h('h2', {}, 'Saved for offline'),
           h('p', { class: 'muted' }, `${store.savedIds.size} saved track${store.savedIds.size === 1 ? '' : 's'} · plays offline`))))
     : h('section', { class: 'card hint' },
       h('p', {}, h('strong', {}, 'Downloads are off. '),
-        'Music streams from your cloud and nothing is stored on this device. ',
+        'Cloud music streams and nothing is stored on this device. ',
         h('a', { href: hashFor.settings() }, 'Change in Settings')));
 
-  show(h('div', { class: 'stack' }, ...cards, device));
+  show(h('div', { class: 'stack' }, pinsCard(), ...cards, device));
 }
+
+// ---------------------------------------------------------------- pinned folders ("My folders")
+//
+// Pin any folder while browsing; it then shows on the home screen and in the player's folder
+// switcher, so changing what's playing is one tap.
+
+const pinKey = (pid, id) => `${pid}:${id}`;
+const pins = () => store.settings.pins || [];
+const isPinned = (pid, id) => pins().some((f) => pinKey(f.pid, f.id) === pinKey(pid, id));
+
+function togglePin(pid, id, name) {
+  const key = pinKey(pid, id);
+  const next = isPinned(pid, id) ? pins().filter((f) => pinKey(f.pid, f.id) !== key) : [...pins(), { pid, id, name }].slice(-30);
+  store.setSetting('pins', next);
+  toast(isPinned(pid, id) ? `Pinned “${name}” to My folders` : `Unpinned “${name}”`);
+  updatePlayerUi();
+}
+
+function pinsCard() {
+  const list = pins();
+  return h('section', { class: 'card pins' },
+    h('h2', {}, 'My folders'),
+    list.length
+      ? h('ul', { class: 'list pin-list' }, list.map((f) => {
+        const p = getProvider(f.pid);
+        return h('li', { class: 'row' },
+          h('button', { class: 'row-main', onclick: () => playFolder(f), title: `Play everything in ${f.name}` },
+            iconSpan('play', 'ico folder'),
+            h('span', { class: 'row-text' },
+              h('span', { class: 'row-title' }, f.name),
+              h('span', { class: 'row-sub' }, p?.label || f.pid))),
+          h('a', { class: 'icon-btn', href: hashFor.folder(f.pid, f.id, f.name), title: 'Open folder', html: icons.folder }),
+          h('button', { class: 'icon-btn', title: 'Unpin', 'aria-label': `Unpin ${f.name}`, html: icons.close,
+            onclick: () => { togglePin(f.pid, f.id, f.name); render(); } }));
+      }))
+      : h('p', { class: 'muted' }, 'Pin folders while browsing (☆ Pin) to switch your music here in one tap.'));
+}
+
+/** Plays a whole folder, subfolders included, and remembers it as the current source. */
+async function playFolder(f) {
+  const p = getProvider(f.pid);
+  if (!p?.isConnected()) {
+    toast(`Connect ${p?.label || 'that source'} first`);
+    return;
+  }
+  const t = toast(`Loading “${f.name}”…`, { timeout: 0 });
+  try {
+    const tracks = await p.listRecursive(f.id, f.name, {
+      onProgress: (n) => { t.firstChild.textContent = `Loading “${f.name}”… ${n}`; },
+    });
+    t.remove();
+    if (!tracks.length) return toast(`No music in “${f.name}”`);
+    currentSource = f;
+    player.playList(tracks, 0);
+    toast(`Playing ${tracks.length} tracks from “${f.name}”`);
+  } catch (err) {
+    t.remove();
+    if (err instanceof AuthRequiredError) {
+      toast(err.message, { timeout: 0, action: { label: 'Allow', run: () => p.reconnect().then(() => playFolder(f)).catch((e) => toast(e.message)) } });
+    } else toast(err.message);
+  }
+}
+
+/** The folder that's playing, for the player's folder switcher. */
+let currentSource = null;
 
 async function browseView(pid, folderId, name, stale) {
   const p = getProvider(pid);
@@ -222,6 +291,10 @@ async function browseView(pid, folderId, name, stale) {
       listing = cached;
       fromCache = true;
     } else if (err instanceof AuthRequiredError) {
+      if (p.id === 'local') {
+        return show(crumbs, message('Allow access to your music folder', err.message,
+          reconnectButton(p, render, 'Allow access'), h('button', { class: 'btn', onclick: () => connect(p) }, 'Choose another folder')));
+      }
       return show(crumbs, message('Sign-in needed', `${p.label} needs you to sign in again.`, reconnectButton(p)));
     } else {
       return show(crumbs, message("Couldn't load this folder",
@@ -232,12 +305,18 @@ async function browseView(pid, folderId, name, stale) {
   if (stale()) return;
 
   const { folders, tracks } = listing;
+  const pinned = isPinned(pid, folderId);
   const actions = h('div', { class: 'actions' },
-    tracks.length > 0 && h('button', { class: 'btn primary', onclick: () => player.playList(tracks, 0, { shuffle: false }) },
+    h('button', {
+      class: `btn${pinned ? ' on' : ''}`,
+      title: pinned ? 'Unpin from My folders' : 'Pin to My folders for one-tap switching',
+      onclick: () => { togglePin(pid, folderId, name); render(); },
+    }, pinned ? '★ Pinned' : '☆ Pin'),
+    tracks.length > 0 && h('button', { class: 'btn primary', onclick: () => { currentSource = { pid, id: folderId, name }; player.playList(tracks, 0, { shuffle: false }); } },
       iconSpan('play'), 'Play'),
-    tracks.length > 0 && h('button', { class: 'btn', onclick: () => player.playList(tracks, 0, { shuffle: true }) },
+    tracks.length > 0 && h('button', { class: 'btn', onclick: () => { currentSource = { pid, id: folderId, name }; player.playList(tracks, 0, { shuffle: true }); } },
       iconSpan('shuffle'), 'Shuffle'),
-    folders.length > 0 && !fromCache && h('button', { class: 'btn', onclick: () => playEverything(p, folderId, name) },
+    folders.length > 0 && !fromCache && h('button', { class: 'btn', onclick: () => playFolder({ pid, id: folderId, name }) },
       iconSpan('layers'), 'Play all incl. subfolders'),
     tracks.length > 0 && store.settings.allowDownloads && !fromCache && h('button', {
       class: 'btn',
@@ -254,22 +333,6 @@ async function browseView(pid, folderId, name, stale) {
     tracks.length ? trackList(tracks, { sub: () => '' }) : null,
     !tracks.length && !folders.length ? message('Nothing here', 'No folders or audio files in this folder.') : null);
   refreshRows();
-}
-
-async function playEverything(p, folderId, name) {
-  const t = toast('Collecting tracks…', { timeout: 0 });
-  try {
-    const tracks = await p.listRecursive(folderId, name, {
-      onProgress: (n) => { t.firstChild.textContent = `Collecting tracks… ${n}`; },
-    });
-    t.remove();
-    if (!tracks.length) return toast('No audio files found');
-    player.playList(tracks, 0);
-    toast(`Playing ${tracks.length} tracks`);
-  } catch (err) {
-    t.remove();
-    toast(err.message);
-  }
 }
 
 async function savedView(stale) {
@@ -652,6 +715,9 @@ function buildPlayerUi() {
     h('div', { class: 'window playlist' },
       h('div', { class: 'titlebar' },
         h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' })),
+      h('label', { class: 'pl-source' },
+        h('span', { class: 'pl-source-label' }, 'FOLDER'),
+        h('select', { id: 'pl-source', 'aria-label': 'Switch music folder', onchange: onSourcePick })),
       h('ol', { class: 'pl', id: 'pl' }),
       h('div', { class: 'pl-foot', id: 'pl-foot' })));
 }
@@ -725,7 +791,34 @@ function updatePlayerUi() {
   updateTime();
 }
 
+/** Fills the player's folder switcher: what's playing, your pinned folders, and "browse". */
+function renderSourcePicker() {
+  const sel = $('#pl-source');
+  if (!sel || document.activeElement === sel) return; // don't rebuild under an open menu
+  const list = pins();
+  const cur = currentSource;
+  const curPinned = cur ? list.findIndex((f) => pinKey(f.pid, f.id) === pinKey(cur.pid, cur.id)) : -1;
+  sel.replaceChildren(...[
+    curPinned < 0 && h('option', { value: '', disabled: true, selected: true }, cur ? `▶ ${cur.name}` : 'Choose a folder to play…'),
+    ...list.map((f, i) => h('option', { value: String(i), selected: i === curPinned }, `${i === curPinned ? '▶ ' : ''}${f.name}`)),
+    h('option', { value: 'browse' }, list.length ? '📂 Browse for more…' : '📂 Browse folders… (pin some with ☆)'),
+  ].filter(Boolean));
+}
+
+function onSourcePick(e) {
+  const v = e.target.value;
+  e.target.blur();
+  if (v === 'browse') {
+    closeFull();
+    location.hash = hashFor.home();
+  } else if (v !== '') {
+    playFolder(pins()[Number(v)]);
+  }
+  renderSourcePicker();
+}
+
 function renderPlaylist() {
+  renderSourcePicker();
   const pl = $('#pl');
   const tracks = player.queue;
   if (shownQueue !== tracks) {
@@ -864,11 +957,18 @@ window.addEventListener('hashchange', render);
 async function start() {
   $('#back').innerHTML = icons.back;
   $('#settings-link').innerHTML = icons.settings;
-  $('#gen-skin').innerHTML = icons.dice;
-  $('#gen-skin').addEventListener('click', generateAndApply);
+  $('#fab-skin').innerHTML = icons.dice;
+  $('#fab-skin').addEventListener('click', () => {
+    const fab = $('#fab-skin');
+    fab.classList.remove('roll');
+    void fab.offsetWidth; // restart the roll animation
+    fab.classList.add('roll');
+    generateAndApply();
+  });
   buildPlayerUi();
   applySkin(currentSkin());
   await store.init();
+  await providers.local.init().catch(() => {});
   try {
     const { dropbox } = providers;
     if (await dropbox.handleRedirect()) {

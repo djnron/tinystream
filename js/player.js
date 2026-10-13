@@ -240,7 +240,8 @@ export class Player extends EventTarget {
       .fetchBlob(track, { signal: controller.signal })
       .then((blob) => {
         const { allowDownloads, saveOnPlay } = store.settings;
-        if (allowDownloads && saveOnPlay && !store.savedIds.has(track.id)) {
+        // Local files are already on the device, so there's nothing to save.
+        if (allowDownloads && saveOnPlay && track.provider !== 'local' && !store.savedIds.has(track.id)) {
           store.saveTrack(track, blob).catch((e) => console.warn('save failed', e));
         }
         return blob;

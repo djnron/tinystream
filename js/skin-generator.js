@@ -109,8 +109,16 @@ const UI_FONTS = [
   'Georgia, "Times New Roman", serif',
   '"Arial Black", Arial, sans-serif',
   'system-ui, -apple-system, "Segoe UI", sans-serif',
+  'Impact, "Arial Narrow Bold", sans-serif',
+  'Papyrus, fantasy',
+  '"Brush Script MT", "Segoe Script", cursive',
+  'Copperplate, "Copperplate Gothic Light", fantasy',
+  'Rockwell, "Courier New", serif',
+  'Futura, "Century Gothic", sans-serif',
+  '"Marker Felt", "Comic Sans MS", cursive',
+  '"Courier New", monospace',
 ];
-const RADII = ['0px', '0px', '2px', '2px', '3px', '4px', '6px', '10px', '16px'];
+const RADII = ['0px', '0px', '2px', '3px', '4px', '6px', '10px', '16px', '22px', '28px'];
 
 /** The skin's own playlist font, if it's a plain font name we can safely use. */
 function uiFont(name, roll) {
@@ -131,9 +139,17 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   const pick = (list) => list[Math.floor(rand() * list.length)];
   const a = pick(CORPUS);
   const b = rand() < 0.35 ? pick(CORPUS) : a; // sometimes a second skin's screen
+  // Color mutations, applied to every color from the source skins:
+  //  - hue shift: a quarter of skins get a dramatic one (120-240°), almost half a moderate one;
+  //  - acid: one in five gets its saturation cranked up.
   const roll = rand();
-  const shift = roll < 0.1 ? 150 + rand() * 60 : roll < 0.5 ? rand() * 50 - 25 : 0;
-  const P = (c) => (shift ? hue(c, shift) : c);
+  const shift = roll < 0.25 ? 120 + rand() * 120 : roll < 0.7 ? rand() * 80 - 40 : 0;
+  const acid = rand() < 0.2;
+  const P = (c) => {
+    let out = shift ? hue(c, shift) : c;
+    if (acid) { const [hh, ss, ll] = toHsl(out); out = fromHsl([hh, clamp(ss * 1.7 + 0.15), ll]); }
+    return out;
+  };
 
   // Chrome from skin A, screen + playlist from skin B.
   const frame = P(a.frame);
@@ -145,7 +161,9 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   const [, visTop, visMid, visBottom, , visPeak] = b.vis.map(P);
 
   // Page colors follow the deck: dark deck -> dark page, light deck -> light page.
-  const dark = luminance(frame) < 0.3 || (luminance(frame) < 0.5 && rand() < 0.5);
+  // Usually the page follows the deck (dark deck, dark page); sometimes it's flipped on purpose.
+  const follows = luminance(frame) < 0.3 || (luminance(frame) < 0.5 && rand() < 0.5);
+  const dark = rand() < 0.15 ? !follows : follows;
   const bg = dark ? withL(frame, 0.08 + rand() * 0.05, 0.6) : withL(frame, 0.94 + rand() * 0.03, 0.5);
   const surface = dark ? light(bg, 0.05) : mix(bg, '#ffffff', 0.7);
   const surface2 = dark ? light(bg, 0.1) : light(bg, -0.05);
@@ -232,9 +250,15 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   return { id: 'custom', name, tokens: validateTokens(tokens), layout, inspiredBy };
 }
 
-/** A random player layout. Each option is equally likely except side and order, which lean default. */
+/**
+ * A random player layout. Every option is equally likely, except side and order (which lean to the
+ * default) and the wild extras (shape, tilt, pattern, effect), which are on more often than off.
+ */
 function rollLayout(rand, pick, previous) {
   const layout = Object.fromEntries(Object.entries(LAYOUT).map(([key, options]) => [key, pick(options)]));
+  for (const key of ['shape', 'tilt', 'pattern', 'fx']) {
+    if (layout[key] === LAYOUT[key][0] && rand() < 0.6) layout[key] = pick(LAYOUT[key].slice(1));
+  }
   // Never the same deck arrangement or button style twice in a row.
   for (const key of ['deck', 'buttons']) {
     while (previous && layout[key] === previous[key]) layout[key] = pick(LAYOUT[key]);

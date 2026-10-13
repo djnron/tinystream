@@ -43,7 +43,7 @@ export function setSetting(key, value) {
 // ---------- IndexedDB ----------
 
 const DB_NAME = 'music-box';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise;
 
 function openDb() {
@@ -51,9 +51,11 @@ function openDb() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      db.createObjectStore('tracks', { keyPath: 'id' }); // metadata of saved tracks
-      db.createObjectStore('blobs'); // audio data, keyed by track id
-      db.createObjectStore('listings'); // folder listings, for browsing offline
+      const add = (name, opts) => db.objectStoreNames.contains(name) || db.createObjectStore(name, opts);
+      add('tracks', { keyPath: 'id' }); // metadata of saved tracks
+      add('blobs'); // audio data, keyed by track id
+      add('listings'); // folder listings, for browsing offline
+      add('handles'); // the local music folder the user picked (a pointer, not music)
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => { dbPromise = null; reject(req.error); };
@@ -133,6 +135,23 @@ export async function getListing(key) {
   } catch {
     return null;
   }
+}
+
+/** The picked local folder handle. Not music data, so it's kept even when downloads are off. */
+export async function putHandle(key, handle) {
+  await run('handles', 'readwrite', (t) => t.objectStore('handles').put(handle, key));
+}
+
+export async function getHandle(key) {
+  try {
+    return await run('handles', 'readonly', (t) => t.objectStore('handles').get(key));
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteHandle(key) {
+  await run('handles', 'readwrite', (t) => t.objectStore('handles').delete(key));
 }
 
 export async function storageInfo() {

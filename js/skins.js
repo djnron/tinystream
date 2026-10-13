@@ -47,7 +47,7 @@ export const TOKENS = {
  * The first value of each list is the default.
  */
 export const LAYOUT = {
-  deck: ['classic', 'hero', 'rack', 'boombox', 'cassette', 'strip'], // how the player is arranged
+  deck: ['classic', 'hero', 'rack', 'boombox', 'cassette', 'strip', 'orbit', 'split'], // how the player is arranged
   buttons: ['bevel', 'round', 'pill', 'flat', 'keys', 'labels'], // transport button shape
   titlebar: ['grips', 'center', 'left', 'slim'],
   lcd: ['sunken', 'pill', 'crt', 'dots', 'outline'], // the screen's frame and texture
@@ -55,6 +55,11 @@ export const LAYOUT = {
   frame: ['bevel', 'outline', 'soft', 'double'], // window chrome
   vis: ['bars', 'mirror', 'blocks', 'dots'], // how the spectrum is drawn
   list: ['plain', 'zebra', 'compact'], // playlist rows
+  shape: ['box', 'blob', 'notch', 'slant', 'arch', 'wave'], // window silhouettes
+  tilt: ['none', 'left', 'right', 'wonky'], // windows rotated a few degrees
+  pattern: ['none', 'stripes', 'checker', 'polka', 'zigzag', 'plaid', 'sunburst', 'scan'], // deck texture
+  fx: ['none', 'hue-drift', 'glow', 'float', 'glitch', 'rainbow', 'jelly'], // animation
+  type: ['plain', 'wide', 'slanted', 'chunky'], // lettering on title bars and the display
   side: ['left', 'right'], // which side of the library the player sits on (wide screens)
   order: ['deck-first', 'list-first'], // player above or below the playlist
 };

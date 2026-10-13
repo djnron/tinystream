@@ -1,6 +1,10 @@
 # Music Box
 
-A small, installable web app (PWA) that plays your music straight from **Google Drive** and **Dropbox**.
+A small, installable web app (PWA) that plays your music from a **folder on your device**, **Google Drive**
+and **Dropbox**.
+
+**Live at https://djnron.github.io/tinystream/**. The device folder works right away; Google Drive and
+Dropbox need keys (see Setup).
 It's a lightweight take on [Cloud Music Box](https://github.com/ContentsViewer/cloud-music-box), written
 from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies.
 
@@ -9,6 +13,14 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
   subfolders*. The next track downloads while the current one plays, so switching is quick, and a track
   that fails to load is skipped instead of stopping the music. Lock-screen and headphone controls work
   through the Media Session API.
+- **Switch music folders in one tap.**
+  - **Pin folders:** pin any folder while browsing (☆ Pin). Pinned folders appear under **My folders** on
+    the home screen, and in the **FOLDER** switcher at the top of the player's playlist. Picking one plays
+    everything in it, subfolders included.
+  - **Folder on this device:** plays music straight from your computer or phone, with no account. Use
+    **Change folder** to switch.
+  - **Browser support:** Chrome and Edge remember the folder between visits. Other browsers ask for it
+    again each visit.
 - **You decide whether anything is downloaded.** *Settings → Allow downloads to this device* is **off by
   default**. While it's off, music only streams and the app stores no audio or folder listings on the
   device. Turn it on to save single tracks, whole folders, or (optionally) every track as it plays, so it
@@ -21,8 +33,8 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
   spectrum or oscilloscope visualizer, beveled transport buttons, and a playlist window. Seven built-in
   skins (Deck 98, Amber Terminal, Neon Arcade, Vaporwave, Brushed Steel, Bubblegum, Clean). You can
   also load your own skin file.
-- **🎲 Skin generator.** One button (top bar, or Settings → Skin) makes a brand-new skin, with new
-  colors and a new layout. Colors come from the palettes of real classic skins in the
+- **🎲 Skin generator.** One floating button, always on screen, makes a brand-new skin, with new colors and
+  a new layout. Colors come from the palettes of real classic skins in the
   [Winamp Skin Museum](https://skins.webamp.org/). The arrangement, buttons, screen, frame and
   visualizer are rolled fresh, so no two presses in a row look or sit the same. Every generated skin
   gets a name and credits the museum skins it was inspired by.
@@ -86,8 +98,9 @@ The examples below assume the app is at `http://localhost:8080/`. Add your real 
 
 ## Deploy to GitHub Pages
 
-The repo includes `.github/workflows/pages.yml`. In the GitHub repo, go to **Settings → Pages → Source**
-and choose **GitHub Actions**. Every push to `main` then publishes the app. Remember to add the Pages URL
+`.github/workflows/pages.yml` copies the app into the `gh-pages` branch on every push to `main`. If the site
+doesn't appear, go to **Settings → Pages**, set **Source: Deploy from a branch**, and choose **Branch: gh-pages /
+(root)**. That's a one-time step. Remember to add the Pages URL
 to the Google origins and Dropbox redirect URIs above.
 
 Client IDs and app keys are public by design (they're visible in any web app that uses them), so it's fine
@@ -103,7 +116,7 @@ A skin has two parts, both defined in [`js/skins.js`](js/skins.js):
 
 | Layout key | Options |
 | --- | --- |
-| `deck` | `classic` · `hero` (big centered time) · `rack` (controls in a column) · `boombox` (speakers that thump with the beat) · `cassette` (reels that spin while playing) · `strip` (visualizer behind the display) |
+| `deck` | `classic` · `orbit` (round screen, buttons on an arc) · `split` (floating pods) · `hero` (big centered time) · `rack` (controls in a column) · `boombox` (speakers that thump with the beat) · `cassette` (reels that spin while playing) · `strip` (visualizer behind the display) |
 | `buttons` | `bevel` · `round` · `pill` · `flat` · `keys` (chunky 3D keys) · `labels` (PLAY / STOP text instead of icons) |
 | `titlebar` | `grips` · `center` · `left` · `slim` |
 | `lcd` | `sunken` · `pill` · `crt` (scanlines) · `dots` (dot matrix) · `outline` |
@@ -111,6 +124,11 @@ A skin has two parts, both defined in [`js/skins.js`](js/skins.js):
 | `frame` | `bevel` · `outline` (hard shadow) · `soft` · `double` |
 | `vis` | `bars` · `mirror` · `blocks` · `dots` |
 | `list` | `plain` · `zebra` · `compact` |
+| `shape` | `box` · `blob` · `notch` · `slant` · `arch` · `wave` |
+| `tilt` | `none` · `left` · `right` · `wonky` |
+| `pattern` | `none` · `stripes` · `checker` · `polka` · `zigzag` · `plaid` · `sunburst` · `scan` |
+| `fx` | `none` · `hue-drift` · `glow` · `float` · `glitch` · `rainbow` · `jelly` (wobbles to the beat) |
+| `type` | `plain` · `wide` · `slanted` · `chunky` |
 | `side`, `order`, `width` | player left or right of the library, playlist above or below it, column width 300–460 px |
 
 Every combination has been checked to fit at phone width and on desktop. The built-in skins each use

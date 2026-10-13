@@ -10,6 +10,8 @@ const ID = 'dropbox';
 const TOKEN_KEY = 'mb.dropbox.token';
 const PKCE_KEY = 'mb.dropbox.pkce';
 const SCOPES = 'files.metadata.read files.content.read';
+// Asked for only when you first share a record (tick these in the Dropbox app console too).
+const SHARING_SCOPES = 'sharing.read sharing.write';
 
 const redirectUri = () => location.origin + location.pathname;
 
@@ -26,6 +28,7 @@ function storeToken(resp, refreshToken) {
     access_token: resp.access_token,
     expires_at: Date.now() + (Number(resp.expires_in) - 60) * 1000,
     refresh_token: resp.refresh_token || refreshToken,
+    scope: resp.scope || readToken()?.scope || SCOPES,
   };
   localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
   return token;
@@ -68,6 +71,21 @@ async function call(url, init = {}) {
     throw new Error(`Dropbox error ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`);
   }
   return res;
+}
+
+/** Like rpc(), but hands back Dropbox's error details instead of throwing. */
+async function rawRpc(endpoint, body) {
+  const send = (token) => fetch(`https://api.dropboxapi.com/2/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  let res = await send(await getToken());
+  if (res.status === 401) res = await send(await getToken({ forceRefresh: true }));
+  const text = await res.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch { data = { error_summary: text.slice(0, 120) }; }
+  return { ok: res.ok, status: res.status, data };
 }
 
 const rpc = async (endpoint, body) =>
@@ -118,10 +136,10 @@ export const dropbox = {
   isConnected: () => Boolean(readToken()),
 
   /** Leaves the page for Dropbox's consent screen; handleRedirect() finishes on return. */
-  async connect() {
+  async connect({ sharing = false, back = location.hash } = {}) {
     const verifier = randomString(64);
     const state = randomString(16);
-    sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state, back: location.hash }));
+    sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state, back }));
     const challenge = base64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
     const params = new URLSearchParams({
       client_id: CONFIG.dropboxAppKey,
@@ -130,15 +148,47 @@ export const dropbox = {
       code_challenge_method: 'S256',
       redirect_uri: redirectUri(),
       token_access_type: 'offline', // gives a refresh token so playback isn't cut off after 4 hours
-      scope: SCOPES,
+      scope: sharing ? `${SCOPES} ${SHARING_SCOPES}` : SCOPES,
       state,
     });
+    if (sharing) params.set('include_granted_scopes', 'user');
     location.assign(`https://www.dropbox.com/oauth2/authorize?${params}`);
     return new Promise(() => {}); // the page is navigating away
   },
 
   reconnect() {
     return this.connect();
+  },
+
+  /** True once the sharing permission has been granted (needed to make share links). */
+  canShare() {
+    return /\bsharing\.write\b/.test(readToken()?.scope || '');
+  },
+
+  /** Creates (or reuses) a public share link for one file and returns its URL. */
+  async shareFile(fileId) {
+    if (!this.canShare()) throw Object.assign(new Error('Dropbox needs permission to make share links'), { code: 'dropbox-scope' });
+    const res = await rawRpc('sharing/create_shared_link_with_settings', { path: fileId });
+    if (res.ok) return res.data.url;
+    const tag = res.data?.error?.['.tag'];
+    if (tag === 'shared_link_already_exists') {
+      const existing = res.data.error.shared_link_already_exists?.metadata?.url;
+      if (existing) return existing;
+      const list = await rawRpc('sharing/list_shared_links', { path: fileId, direct_only: true });
+      const url = list.data?.links?.[0]?.url;
+      if (url) return url;
+    }
+    if (res.status === 401 || /missing_scope/.test(JSON.stringify(res.data))) {
+      throw Object.assign(new Error('Dropbox needs permission to make share links'), { code: 'dropbox-scope' });
+    }
+    throw new Error(`Dropbox couldn't share a song (${res.data?.error_summary || res.status})`);
+  },
+
+  async unshareFile(url) {
+    const res = await rawRpc('sharing/revoke_shared_link', { url });
+    if (!res.ok && res.data?.error?.['.tag'] !== 'shared_link_not_found') {
+      throw new Error(`Dropbox error ${res.data?.error_summary || res.status}`);
+    }
   },
 
   emptyHint(folderId) {

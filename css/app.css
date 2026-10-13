@@ -1091,6 +1091,52 @@ body:not(.has-track) .fab { bottom: calc(16px + var(--safe-b)); }
 .mini-lcd { flex: none; height: 40px; padding: 7px 8px; }
 .mini-info .row-sub { color: inherit; opacity: 0.75; }
 
+/* ---------- dialogs and shared records ---------- */
+
+.modal {
+  width: min(92vw, 520px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--raised), 0 20px 60px #000a;
+}
+.modal::backdrop { background: #000a; }
+.modal-body { display: grid; gap: 12px; padding: 20px; }
+.modal-body h2 { margin: 0; font-size: 1.15rem; }
+.modal-body .actions { padding: 0; justify-content: flex-end; }
+.modal-body input[type="text"], .field input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: calc(var(--radius) / 2);
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: var(--sunken);
+  font: inherit;
+}
+.field { display: grid; gap: 4px; }
+.field > span { font-weight: 600; font-size: 0.9rem; }
+.modal-body .setting { border-top: 0; padding: 4px 0; }
+
+.sleeve { margin: 0 16px 16px; text-align: center; padding: 28px 16px; background: var(--deck-bg); color: var(--btn-text); }
+[data-art] .sleeve { background: var(--art-deck, none) 0 0 / 100% 100% no-repeat, var(--deck-bg); }
+.sleeve .sleeve-kicker, .sleeve .sleeve-title, .sleeve .muted {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 6px auto;
+  padding: 4px 10px;
+  background: var(--lcd-bg);
+  color: var(--lcd-text);
+  border-radius: 3px;
+  box-shadow: var(--sunken);
+}
+.sleeve-kicker { font: 700 11px/1.2 var(--font-lcd); letter-spacing: 0.3em; }
+.sleeve .sleeve-title { font-size: 1.6rem; text-shadow: var(--lcd-glow); }
+.sleeve .actions { justify-content: center; padding: 12px 0 0; }
+
 /* ---------- toasts ---------- */
 
 #toasts {

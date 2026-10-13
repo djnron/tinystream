@@ -88,14 +88,16 @@ async function getToken({ forceRenew = false } = {}) {
   return renewing;
 }
 
-async function authedFetch(url, { signal } = {}) {
-  let token = await getToken();
-  let res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal });
-  if (res.status === 401) {
-    token = await getToken({ forceRenew: true });
-    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal });
-  }
+async function authedRequest(url, init = {}) {
+  const send = (token) => fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` } });
+  let res = await send(await getToken());
+  if (res.status === 401) res = await send(await getToken({ forceRenew: true }));
   if (res.status === 401) throw new AuthRequiredError(ID);
+  return res;
+}
+
+async function authedFetch(url, { signal } = {}) {
+  const res = await authedRequest(url, { signal });
   if (res.status === 404 || res.status === 403) {
     throw new Error('Google Drive no longer shares this file with Music Box. Add it again with “Add music”.');
   }
@@ -221,6 +223,35 @@ export const gdrive = {
     const url = `${API}/files/${encodeURIComponent(track.fileId)}?alt=media&supportsAllDrives=true`;
     const res = await authedFetch(url, { signal });
     return withAudioType(await res.blob(), track.fileName);
+  },
+
+  /**
+   * Makes one picked file viewable by anyone with the link (for shared records). Returns the file's
+   * resource key if it has one; older link-shared files need it to be opened.
+   */
+  async shareFile(fileId) {
+    const res = await authedRequest(`${API}/files/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'anyone', role: 'reader', allowFileDiscovery: false }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const reason = err?.error?.errors?.[0]?.reason || '';
+      if (/publishOutNotPermitted|sharingRateLimit|cannotShare|domainPolicy|teamDrivesSharing/i.test(reason) || res.status === 403) {
+        throw new Error('Google Drive won\'t share this song by link. Your organization may block sharing outside it '
+          + '(Google Admin → Apps → Drive → Sharing settings).');
+      }
+      throw new Error(`Google Drive couldn't share a song (${res.status})`);
+    }
+    const meta = await (await authedRequest(`${API}/files/${encodeURIComponent(fileId)}?fields=resourceKey&supportsAllDrives=true`)).json().catch(() => ({}));
+    return meta.resourceKey || null;
+  },
+
+  /** Turns "anyone with the link" back off for one file. */
+  async unshareFile(fileId) {
+    const res = await authedRequest(`${API}/files/${encodeURIComponent(fileId)}/permissions/anyoneWithLink?supportsAllDrives=true`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) throw new Error(`Google Drive error ${res.status}`);
   },
 
   /** Extra buttons the browse screen shows for this source. */

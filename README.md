@@ -21,6 +21,9 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
     **Change folder** to switch.
   - **Browser support:** Chrome and Edge remember the folder between visits. Other browsers ask for it
     again each visit.
+- **Share a record.** Open a Google Drive collection or a Dropbox folder and press **⤴ Share as record**.
+  You get one link that carries the song list and your skin; anyone can open it and listen, with no
+  account. Tick **Disable downloads** to remove every download and save option for listeners.
 - **You decide whether anything is downloaded.** *Settings → Allow downloads to this device* is **off by
   default**. While it's off, music only streams and the app stores no audio or folder listings on the
   device. Turn it on to save single tracks, whole folders, or (optionally) every track as it plays, so it
@@ -145,6 +148,44 @@ to the Google origins and Dropbox redirect URIs above.
 Client IDs and app keys are public by design (they're visible in any web app that uses them), so it's fine
 to commit `config.js`.
 
+## Sharing records
+
+**⤴ Share as record** does two things:
+
+1. **Shares the songs by link.**
+   - **Google Drive:** turns on "anyone with the link" for just those songs, using the same `drive.file`
+     permission.
+   - **Dropbox:** creates share links for them.
+
+   Nothing else in your Drive or Dropbox is shared.
+2. **Makes a link** whose part after `#` holds the title, the song list and your skin, compressed. No
+   server is involved; the link *is* the record.
+
+**Your friend's side:** they open the link and see the record in your skin, with **Play**, **Shuffle**
+and **Keep this skin**.
+
+- **Playback:** songs stream straight from Google (via the site's API key) or Dropbox
+  (`dl.dropboxusercontent.com`), with no sign-in.
+- **Untrusted links:** everything in a link is checked before use. A skin that tries to load anything is
+  ignored, and malformed tracks are dropped.
+
+**Disable downloads** hides download buttons, save-for-offline and direct file links for that record.
+It's a deterrent, not protection: a browser that can play a song has its data, so someone technical
+could still save it.
+
+**Stop sharing** (Settings → Shared records) turns link access back off for those songs. A song that's
+also in another shared record stays shared until that record is stopped too. Only share music you have
+the right to share.
+
+**One-time Dropbox step:**
+
+1. In your Dropbox app's **Permissions** tab, tick `sharing.read` and `sharing.write`, then click
+   **Submit**.
+2. The first time you share, the app asks Dropbox for that permission once.
+
+Google Drive needs nothing extra. If your Google Workspace blocks sharing outside the organization, Google
+refuses, and the app says so.
+
 ## Skins
 
 A skin has two parts, both defined in [`js/skins.js`](js/skins.js):
@@ -238,6 +279,7 @@ css/app.css
 js/app.js             views, routing, the deck + playlist UI
 js/skins.js           skin tokens, built-in skins, skin-file loading
 js/skin-generator.js  the 🎲 generator
+js/share.js           shared records: making links, opening them, stop sharing
 js/skin-corpus.js     palettes sampled from 400 museum skins (generated, loaded on first 🎲)
 tools/build_skin_corpus.py   rebuilds skin-corpus.js from the Winamp Skin Museum API
 js/lcd.js             seven-segment LCD digits (SVG)

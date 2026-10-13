@@ -1,7 +1,8 @@
 import * as downloads from './downloads.js';
 import { icons } from './icons.js';
 import { Player } from './player.js';
-import { getProvider, providers } from './providers/index.js';
+import { getProvider, providers, registerHidden } from './providers/index.js';
+import { createRecord, downloadUrl, myRecords, openRecord, sharedSource, stopSharing } from './share.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
@@ -11,6 +12,7 @@ import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.j
 import * as visualizer from './visualizer.js';
 
 const player = new Player();
+registerHidden(sharedSource);
 const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
 let renderSeq = 0;
@@ -50,6 +52,8 @@ async function render() {
   back.onclick = () => { location.hash = parentHash(route); };
   const stale = () => seq !== renderSeq;
 
+  restoreOwnSkin(route[0] === 'r');
+  if (route[0] === 'r') return recordView(route[1], stale);
   if (route[0] === 'b') return browseView(route[1], route[2], route[3], stale);
   if (route[0] === 'saved') return savedView(stale);
   if (route[0] === 'settings') return settingsView(stale);
@@ -74,6 +78,7 @@ const iconSpan = (name, cls = 'ico') => h('span', { class: cls, html: icons[name
 /** Per-track save button, shown only when the user allows downloads. */
 function saveButton(track) {
   if (track.provider === 'local') return null; // already on this device
+  if (track.provider === 'shared') return null; // someone else's record: never saved here
   if (store.savedIds.has(track.id)) {
     return h('span', { class: 'icon-btn saved', title: 'Saved on this device', html: icons.saved });
   }
@@ -328,8 +333,10 @@ async function browseView(pid, folderId, name, stale) {
       }
     },
   }, a.label));
+  const canShare = (pid === 'gdrive' || pid === 'dropbox') && (tracks.length > 0 || folders.length > 0) && !fromCache;
   const actions = h('div', { class: 'actions' },
     ...extra,
+    canShare && h('button', { class: 'btn', onclick: () => openShareDialog({ pid, folderId, name }) }, '⤴ Share as record'),
     h('button', {
       class: `btn${pinned ? ' on' : ''}`,
       title: pinned ? 'Unpin from My folders' : 'Pin to My folders for one-tap switching',
@@ -528,7 +535,7 @@ async function settingsView(stale) {
     h('div', { class: 'actions' },
       h('button', { class: 'btn danger', onclick: resetApp }, 'Reset app')));
 
-  show(h('div', { class: 'stack' }, skinSection, downloadsSection, playbackSection, accounts, about));
+  show(h('div', { class: 'stack' }, skinSection, recordsSection(), downloadsSection, playbackSection, accounts, about));
 }
 
 // ---------------------------------------------------------------- skins
@@ -551,7 +558,7 @@ function useSkin(sk) {
 // The player's title bar shows the skin's name, like the old skinned players did.
 window.addEventListener('skinchange', () => {
   const label = document.getElementById('deck-label');
-  if (label) label.textContent = currentSkin().name.toUpperCase();
+  if (label) label.textContent = (recordSkin || currentSkin()).name.toUpperCase();
 });
 
 /** A tiny preview of the skin, drawn with its own tokens. */
@@ -623,6 +630,205 @@ function downloadSkinTemplate() {
   const a = h('a', { href: URL.createObjectURL(blob), download: 'music-box-skin.json' });
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------------------------------------------------------------- shared records
+//
+// "Share as record" turns on link sharing for one folder's songs and makes a link that carries the
+// track list and your skin (see share.js). Anyone can open it and listen without an account.
+
+const PENDING_SHARE = 'mb.pendingShare';
+
+function modal(...children) {
+  const dlg = h('dialog', { class: 'modal' }, ...children);
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+  return dlg;
+}
+
+async function openShareDialog({ pid, folderId, name, title, noDownload = true }) {
+  const p = getProvider(pid);
+  const t = toast(`Collecting songs in “${name}”…`, { timeout: 0 });
+  let tracks;
+  try {
+    tracks = await p.listRecursive(folderId, name);
+  } catch (err) {
+    t.remove();
+    return toast(err.message);
+  }
+  t.remove();
+  if (!tracks.length) return toast('There are no songs here to share');
+  const skin = currentSkin();
+  const where = pid === 'gdrive' ? 'Google Drive' : 'Dropbox';
+  const titleInput = h('input', { type: 'text', value: title || name, maxlength: 80, 'aria-label': 'Record title' });
+  const lock = h('input', { type: 'checkbox', checked: noDownload });
+  const status = h('p', { class: 'setting-desc', role: 'status' });
+  const go = h('button', { class: 'btn primary' }, 'Create link');
+  const body = h('div', { class: 'modal-body' },
+    h('h2', {}, '⤴ Share as record'),
+    h('label', { class: 'field' }, h('span', {}, 'Title'), titleInput),
+    h('label', { class: 'setting' },
+      h('span', { class: 'setting-text' },
+        h('span', { class: 'setting-label' }, 'Disable downloads'),
+        h('span', { class: 'setting-desc' }, 'Listeners get no download or save buttons. A deterrent, not a lock: '
+          + 'someone technical could still save what their browser plays.')),
+      lock),
+    h('p', { class: 'setting-desc' },
+      `${Math.min(tracks.length, 300)} song${tracks.length === 1 ? '' : 's'} from ${where}`,
+      tracks.length > 300 ? ' (the first 300)' : '',
+      `, in your skin “${skin.name}”. `,
+      h('strong', {}, `These songs become viewable by anyone with the link in your ${where}`),
+      '; nothing else is shared. You can stop sharing any time in Settings → Shared records. '
+      + 'Only share music you have the right to share.'),
+    status,
+    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'), go));
+  const dlg = modal(body);
+
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    try {
+      const { url, truncated } = await createRecord({
+        title: titleInput.value.trim() || name,
+        tracks,
+        skin,
+        noDownload: lock.checked,
+        onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} / ${total}`; },
+      });
+      showShareResult(body, url, truncated);
+    } catch (err) {
+      go.disabled = false;
+      if (err.code === 'dropbox-scope') {
+        status.replaceChildren(
+          'Dropbox needs one more permission to make share links. In the Dropbox app console, tick ',
+          h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'),
+          ' on the Permissions tab, then: ',
+          h('button', {
+            class: 'btn primary',
+            onclick: () => {
+              sessionStorage.setItem(PENDING_SHARE, JSON.stringify({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked }));
+              providers.dropbox.connect({ sharing: true, back: location.hash });
+            },
+          }, 'Allow sharing in Dropbox'));
+      } else {
+        status.textContent = err.message;
+      }
+    }
+  });
+}
+
+function showShareResult(body, url, truncated) {
+  const field = h('input', { type: 'text', readonly: true, value: url, 'aria-label': 'Record link', onfocus: (e) => e.target.select() });
+  const copy = h('button', {
+    class: 'btn primary',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        copy.textContent = 'Copied ✓';
+      } catch {
+        field.select();
+        copy.textContent = 'Press Ctrl/⌘-C';
+      }
+    },
+  }, 'Copy link');
+  body.replaceChildren(
+    h('h2', {}, '✓ Your record is ready'),
+    h('p', { class: 'setting-desc' }, 'Anyone with this link can listen, no account needed.',
+      truncated ? ' Only the first 300 songs are included.' : ''),
+    field,
+    h('div', { class: 'actions' },
+      copy,
+      navigator.share && h('button', { class: 'btn', onclick: () => navigator.share({ title: 'A record for you', url }).catch(() => {}) }, 'Share…'),
+      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open'),
+      h('button', { class: 'btn', onclick: () => body.closest('dialog').close() }, 'Done')));
+}
+
+function recordsSection() {
+  const list = myRecords();
+  return h('section', { class: 'card' },
+    h('h2', {}, 'Shared records'),
+    list.length
+      ? h('ul', { class: 'list pin-list' }, list.map((r) => h('li', { class: 'row' },
+        h('span', { class: 'row-main' },
+          h('span', { class: 'row-text' },
+            h('span', { class: 'row-title' }, r.title),
+            h('span', { class: 'row-sub' },
+              `${r.count} songs · ${new Date(r.created).toLocaleDateString()}${r.noDownload ? ' · downloads off' : ''}`))),
+        h('button', {
+          class: 'btn',
+          onclick: async (e) => {
+            try { await navigator.clipboard.writeText(r.url); e.target.textContent = 'Copied ✓'; } catch { prompt('Copy this link', r.url); }
+          },
+        }, 'Copy link'),
+        h('button', {
+          class: 'btn danger',
+          onclick: async () => {
+            if (!confirm(`Stop sharing “${r.title}”? The link stops working and its songs are no longer shared.`)) return;
+            try { await stopSharing(r.id); toast(`Stopped sharing “${r.title}”`); } catch (err) { toast(err.message, { timeout: 8000 }); }
+            render();
+          },
+        }, 'Stop sharing'))))
+      : h('p', { class: 'setting-desc' }, 'Open a Google Drive collection or a Dropbox folder and press “⤴ Share as record” to send it to someone.'));
+}
+
+/** While a shared record is open, it's shown in the sender's skin; leaving restores your own. */
+let recordSkin = null;
+function restoreOwnSkin(stayingOnRecord) {
+  if (stayingOnRecord || !recordSkin) return;
+  recordSkin = null;
+  applySkin(currentSkin());
+  requestAnimationFrame(() => paintSkinArt(currentSkin()));
+}
+
+async function recordView(payload, stale) {
+  rows.clear();
+  setTitle('Shared record');
+  show(h('p', { class: 'muted pad' }, 'Opening record…'));
+  let rec;
+  try {
+    rec = await openRecord(payload || '');
+  } catch {
+    return show(message('This record link is damaged', 'Ask the sender to copy the link again.'));
+  }
+  if (stale()) return;
+  setTitle(rec.title);
+  if (rec.skin) {
+    recordSkin = rec.skin;
+    applySkin(rec.skin);
+    requestAnimationFrame(() => paintSkinArt(rec.skin));
+  }
+  const play = (shuffle) => {
+    currentSource = { pid: 'record', id: payload, name: rec.title };
+    player.playList(rec.tracks, 0, { shuffle });
+  };
+  const dl = (track) => {
+    const href = downloadUrl(track);
+    return href && h('a', { class: 'icon-btn', href, target: '_blank', rel: 'noopener', title: 'Download', 'aria-label': `Download ${track.name}`, html: icons.download });
+  };
+  show(
+    h('section', { class: 'card sleeve' },
+      h('p', { class: 'sleeve-kicker' }, 'A RECORD FOR YOU'),
+      h('h2', { class: 'sleeve-title' }, rec.title),
+      h('p', { class: 'muted' }, `${rec.tracks.length} song${rec.tracks.length === 1 ? '' : 's'}`,
+        rec.skin ? ` · in the skin “${rec.skin.name}”` : '',
+        rec.noDownload ? ' · downloads turned off by the sender' : ''),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn primary', onclick: () => play(false) }, iconSpan('play'), 'Play'),
+        h('button', { class: 'btn', onclick: () => play(true) }, iconSpan('shuffle'), 'Shuffle'),
+        rec.skin && h('button', {
+          class: 'btn',
+          onclick: () => {
+            const keep = { ...rec.skin, id: 'custom', inspiredBy: [] };
+            store.setSetting('customSkin', keep);
+            recordSkin = null;
+            useSkin(keep);
+            toast(`“${rec.skin.name}” is now your skin`);
+          },
+        }, 'Keep this skin'))),
+    rec.tracks.length
+      ? trackList(rec.tracks, { sub: () => '', extra: dl })
+      : message('No songs', 'This record has no playable songs.'));
+  refreshRows();
 }
 
 // ---------------------------------------------------------------- account actions
@@ -999,8 +1205,16 @@ async function start() {
   try {
     const { dropbox } = providers;
     if (await dropbox.handleRedirect()) {
-      toast('Dropbox connected');
-      history.replaceState(null, '', hashFor.folder(dropbox.id, dropbox.rootId, dropbox.rootName));
+      const pending = JSON.parse(sessionStorage.getItem(PENDING_SHARE) || 'null');
+      sessionStorage.removeItem(PENDING_SHARE);
+      if (pending && dropbox.canShare()) {
+        toast('Dropbox can now make share links');
+        history.replaceState(null, '', hashFor.folder(pending.pid, pending.folderId, pending.name));
+        setTimeout(() => openShareDialog(pending), 300);
+      } else {
+        toast('Dropbox connected');
+        history.replaceState(null, '', hashFor.folder(dropbox.id, dropbox.rootId, dropbox.rootName));
+      }
     }
   } catch (err) {
     toast(err.message);

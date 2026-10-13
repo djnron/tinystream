@@ -26,8 +26,10 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
   device. Turn it on to save single tracks, whole folders, or (optionally) every track as it plays, so it
   plays offline later. Turning it off stops downloads right away and asks whether to delete what's already
   saved.
-- **Read-only access.** Google Drive uses the `drive.readonly` scope and Dropbox uses
-  `files.metadata.read` + `files.content.read`. The app can't change or delete anything in your storage.
+- **Minimal, read-only access.**
+  - **Dropbox:** created as an "App folder" app, it only sees `Dropbox/Apps/<app name>/`, read-only.
+  - **Google Drive:** it only sees songs you pick in Google's picker (`drive.file`).
+  - **Either way:** the app can't change or delete anything.
 - **No server.** The browser talks directly to Google and Dropbox. Sign-in tokens stay in your browser.
 - **Skins.** The player is a retro "deck": an LCD screen with segment digits, a scrolling title, a
   spectrum or oscilloscope visualizer, beveled transport buttons, and a playlist window. Seven built-in
@@ -56,45 +58,81 @@ else, serve it over **HTTPS**.
 
 ## Setup: add your keys
 
-Both services need a free developer key that you create once. Put them in [`config.js`](config.js).
-A source with an empty key is shown as "Not set up".
+Both services need free developer keys that you create once. Put them in [`config.js`](config.js).
+A source with empty keys is shown as "Not set up".
 
-The examples below assume the app is at `http://localhost:8080/`. Add your real URL too, e.g.
-`https://<you>.github.io/<repo>/`.
+These keys are **public identifiers, not secrets**. They're visible in the page either way, and on their
+own they can't open anyone's files. Every visitor signs in to their *own* account. Never put a Dropbox
+**App secret** or a Google **client secret** in this repo; the app doesn't need either.
 
-### Google Drive
+Both sources use the **narrowest access** each service offers:
+
+- **Dropbox:** only one app folder.
+- **Google Drive:** only the songs you pick.
+
+Use your real addresses below. This repo is served at `https://tinystream.vercel.app/` and
+`https://djnron.github.io/tinystream/`. Add `http://localhost:8080` too if you run it locally.
+
+### Dropbox (App folder: the app only sees `Dropbox/Apps/<app name>/`)
+
+1. Go to the [Dropbox App Console](https://www.dropbox.com/developers/apps) → **Create app**.
+2. Choose **Scoped access**, then **App folder**, and give it a name, e.g. `tinystream`. This can't be
+   changed later; if you already made a "Full Dropbox" app, create a new one.
+3. On the **Permissions** tab, tick `files.metadata.read` and `files.content.read`, then **Submit**.
+4. On the **Settings** tab:
+   - **OAuth 2 → Redirect URIs**: add each address exactly, including the trailing slash:
+     `https://tinystream.vercel.app/` and `https://djnron.github.io/tinystream/`.
+   - **Allow public clients (Implicit Grant & PKCE)**: **Allow**.
+5. Copy the **App key** into `dropboxAppKey` in `config.js`.
+6. After you connect once, a folder appears at **Dropbox → Apps → tinystream** (named after your app).
+   Put your music there, and subfolders work. The rest of your Dropbox stays invisible to the app.
+
+> Keep the app in **development** status and don't "enable additional users" if it's just for you.
+
+### Google Drive (only the songs you pick)
+
+The app asks for Google's narrowest Drive permission, `drive.file`. It can only open files you choose in
+Google's own picker window, never the rest of your Drive.
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project.
-2. **APIs & Services → Library**: enable the **Google Drive API**.
-3. **APIs & Services → OAuth consent screen**: choose **External**, fill in the app name and your email,
-   and add the scope `.../auth/drive.readonly`. Under **Test users**, add every Google account that will
-   use the app. (While the app is in "Testing" mode, only those accounts can sign in. That's fine for
-   personal use.)
-4. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web application**.
-   Under **Authorized JavaScript origins**, add `http://localhost:8080` and your hosted origin, e.g.
-   `https://<you>.github.io`. No redirect URI is needed.
-5. Copy the **Client ID** into `googleClientId` in `config.js`.
+2. **APIs & Services → Library**: enable **Google Drive API** and **Google Picker API**.
+3. **OAuth consent screen** (called **Google Auth Platform** in newer consoles):
+   - Choose **External** and fill in the app name and your email.
+   - Under **Data access / Scopes**, add `.../auth/drive.file`.
+   - Under **Audience / Test users**, add your Google account. While the app is in "Testing", only the
+     accounts listed there can sign in.
+4. **Credentials → Create credentials → OAuth client ID**, type **Web application**. Under
+   **Authorized JavaScript origins**, add `https://tinystream.vercel.app` and `https://djnron.github.io`.
+   Copy the **Client ID** into `googleClientId`.
+5. **Credentials → Create credentials → API key.** Restrict it:
+   - **Application restrictions → Websites:** `https://tinystream.vercel.app/*` and
+     `https://djnron.github.io/*`.
+   - **API restrictions:** Google Picker API and Google Drive API.
+
+   Copy it into `googleApiKey`.
+6. Find the **Project number** (project settings, or the Dashboard's Project info card) and put it in
+   `googleAppId`.
+
+**Adding music:** in the app, go to **Google Drive → ＋ Add music from Google Drive**.
+
+- **Picking songs:** you can pick individual songs, and shift-click selects a range.
+- **Picking a folder:** this adds the songs inside it if Google shares them with the app; if it doesn't,
+  the app tells you to open the folder and select the songs instead.
+- **Collections:** what you pick is saved as a named collection in your browser (just names and ids), which
+  you can pin, rename, add to, or remove. Removing it never touches your Drive.
 
 > Google browser sign-ins last one hour. Music Box renews it in the background whenever you tap something
 > in the app. If an hour passes with no taps and the next track isn't saved on the device, you'll see a
-> **Reconnect** button. If you listen for hours without touching the screen, turn on downloads and save
-> the folder first.
+> **Reconnect** button.
 
-### Dropbox
+### Taking access away
 
-1. Go to the [Dropbox App Console](https://www.dropbox.com/developers/apps) → **Create app**.
-2. Choose **Scoped access**, then **Full Dropbox** (or **App folder** if you'd rather keep music in
-   `Apps/<your app>`), and give it a name.
-3. On the **Permissions** tab, tick `files.metadata.read` and `files.content.read`, then **Submit**.
-4. On the **Settings** tab:
-   - **OAuth 2 → Redirect URIs**: add the exact app URL, e.g. `http://localhost:8080/` and
-     `https://<you>.github.io/<repo>/` (including the trailing slash).
-   - **Allow public clients (Implicit Grant & PKCE)**: **Allow**.
-5. Copy the **App key** into `dropboxAppKey` in `config.js`. (Don't use the App secret. It isn't needed and
-   must never go in a web page.)
+You can cut the app off at any time, from any device:
 
-> A Dropbox app in development mode can be used by its owner plus up to 500 users you link. Personal
-> use doesn't need production approval.
+- **Google:** [myaccount.google.com/permissions](https://myaccount.google.com/permissions) → remove the app.
+- **Dropbox:** Settings → **Connected apps** → remove it.
+
+On a shared computer, use **Disconnect** (or **Settings → Reset app**) when you're done.
 
 ## Deploy to GitHub Pages
 

@@ -307,7 +307,28 @@ async function browseView(pid, folderId, name, stale) {
 
   const { folders, tracks } = listing;
   const pinned = isPinned(pid, folderId);
+  // Source-specific buttons, e.g. Google Drive's "Add music" (it only sees songs you pick).
+  const extra = (p.actions?.(folderId) || []).map((a) => h('button', {
+    class: `btn${a.primary ? ' primary' : ''}`,
+    onclick: async () => {
+      try {
+        const result = await a.run();
+        const msg = typeof result === 'string' ? result : result?.message;
+        if (msg) toast(msg, { timeout: 7000 });
+        if (result?.goUp) location.hash = parentHash(['b']);
+        else if (result?.newName) {
+          trail = trail.filter((c) => c.id !== folderId); // re-add under the new name
+          location.hash = hashFor.folder(pid, folderId, result.newName);
+        }
+        else if (result) render();
+      } catch (err) {
+        if (err instanceof AuthRequiredError) toast(err.message || `Sign in to ${p.label} again`);
+        else toast(err.message);
+      }
+    },
+  }, a.label));
   const actions = h('div', { class: 'actions' },
+    ...extra,
     h('button', {
       class: `btn${pinned ? ' on' : ''}`,
       title: pinned ? 'Unpin from My folders' : 'Pin to My folders for one-tap switching',
@@ -329,10 +350,10 @@ async function browseView(pid, folderId, name, stale) {
 
   show(crumbs,
     fromCache && h('p', { class: 'banner inline' }, "Offline — showing this folder as it was last seen."),
-    (tracks.length || folders.length) ? actions : null,
+    (tracks.length || folders.length || extra.length) ? actions : null,
     folders.length ? folderList(pid, folders) : null,
     tracks.length ? trackList(tracks, { sub: () => '' }) : null,
-    !tracks.length && !folders.length ? message('Nothing here', 'No folders or audio files in this folder.') : null);
+    !tracks.length && !folders.length ? message('Nothing here', p.emptyHint?.(folderId) || 'No folders or audio files in this folder.') : null);
   refreshRows();
 }
 

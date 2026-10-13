@@ -1,5 +1,7 @@
 // Dropbox source, using OAuth 2 with PKCE (no server, no client secret) and the Dropbox HTTP API.
 // Requested scopes are read-only: files.metadata.read and files.content.read.
+// Create the Dropbox app with "App folder" access (see README): it can then only see
+// Dropbox/Apps/<your app name>/, and paths here are relative to that folder.
 
 import { CONFIG } from '../../config.js';
 import { AuthRequiredError, base64Url, isAudio, naturalSort, randomString, stripExt, withAudioType } from '../util.js';
@@ -88,7 +90,7 @@ async function listEntries(path, recursive, limit = Infinity) {
 
 function parentName(pathDisplay) {
   const parts = pathDisplay.split('/');
-  return parts.length > 2 ? parts[parts.length - 2] : 'Dropbox';
+  return parts.length > 2 ? parts[parts.length - 2] : 'Dropbox app folder';
 }
 
 function toTrack(e) {
@@ -110,7 +112,7 @@ export const dropbox = {
   id: ID,
   label: 'Dropbox',
   rootId: 'root',
-  rootName: 'Dropbox',
+  rootName: 'Dropbox app folder',
 
   isConfigured: () => Boolean(CONFIG.dropboxAppKey),
   isConnected: () => Boolean(readToken()),
@@ -137,6 +139,12 @@ export const dropbox = {
 
   reconnect() {
     return this.connect();
+  },
+
+  emptyHint(folderId) {
+    return folderId === 'root'
+      ? 'Music Box can only see its own app folder. Put music in Dropbox → Apps → (your Dropbox app’s name), then come back.'
+      : 'No folders or audio files in this folder.';
   },
 
   /** Returns true if this page load was the return from Dropbox's consent screen. */
@@ -175,7 +183,7 @@ export const dropbox = {
       .filter((e) => e['.tag'] === 'folder')
       .sort((a, b) => naturalSort(a.name, b.name))
       .map((e) => ({ id: e.path_lower, name: e.name }));
-    const tracks = entries.filter(isTrack).sort(byPath).map((e) => ({ ...toTrack(e), folder: folderName || 'Dropbox' }));
+    const tracks = entries.filter(isTrack).sort(byPath).map((e) => ({ ...toTrack(e), folder: folderName || this.rootName }));
     return { folders, tracks };
   },
 

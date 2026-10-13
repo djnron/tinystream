@@ -647,7 +647,7 @@ function modal(...children) {
   return dlg;
 }
 
-async function openShareDialog({ pid, folderId, name, title, noDownload = true }) {
+async function openShareDialog({ pid, folderId, name, title, noDownload = true }, { auto = false } = {}) {
   const p = getProvider(pid);
   const t = toast(`Collecting songs in “${name}”…`, { timeout: 0 });
   let tracks;
@@ -699,22 +699,55 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
     } catch (err) {
       go.disabled = false;
       if (err.code === 'dropbox-scope') {
-        status.replaceChildren(
-          'Dropbox needs one more permission to make share links. In the Dropbox app console, tick ',
-          h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'),
-          ' on the Permissions tab, then: ',
+        status.replaceChildren(h('div', { class: 'callout' },
+          h('strong', {}, 'One-time step: let Dropbox make share links'),
+          h('ol', { class: 'steps' },
+            h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
+              ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
+              h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
+            h('li', {}, 'Come back to this tab and press the button below. Dropbox asks you to approve, then brings you '
+              + 'back here and your link is made automatically.')),
           h('button', {
             class: 'btn primary',
             onclick: () => {
               sessionStorage.setItem(PENDING_SHARE, JSON.stringify({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked }));
               providers.dropbox.connect({ sharing: true, back: location.hash });
             },
-          }, 'Allow sharing in Dropbox'));
+          }, 'Continue to Dropbox →')));
+        go.hidden = true; // the only way forward is approving in Dropbox
       } else {
         status.textContent = err.message;
       }
     }
   });
+  // Back from approving sharing in Dropbox: carry on straight away.
+  if (auto) go.click();
+}
+
+const DROPBOX_CONSOLE = 'https://www.dropbox.com/developers/apps';
+
+/** Explains the one-time Dropbox setting for sharing, with what Dropbox said if it refused. */
+function dropboxSharingHelp(detail, pending) {
+  const dlg = modal(h('div', { class: 'modal-body' },
+    h('h2', {}, 'Dropbox didn\'t allow sharing yet'),
+    detail && h('p', { class: 'setting-desc' }, 'Dropbox said: ', h('em', {}, detail)),
+    h('p', {}, 'Your Dropbox app needs two permissions turned on. This is a one-time step:'),
+    h('ol', { class: 'steps' },
+      h('li', {}, 'Open the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'), ' and click your app.'),
+      h('li', {}, 'Go to the ', h('strong', {}, 'Permissions'), ' tab.'),
+      h('li', {}, 'Tick ', h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'), '.'),
+      h('li', {}, 'Click ', h('strong', {}, 'Submit'), ' at the bottom of the page.')),
+    h('p', { class: 'setting-desc' }, 'Then come back here and press “Try again”. You\'ll go to Dropbox to approve, '
+      + 'and come straight back with your link made.'),
+    h('div', { class: 'actions' },
+      h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close'),
+      pending && h('button', {
+        class: 'btn primary',
+        onclick: () => {
+          sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending));
+          providers.dropbox.connect({ sharing: true, back: hashFor.folder(pending.pid, pending.folderId, pending.name) });
+        },
+      }, 'Try again'))));
 }
 
 function showShareResult(body, url, truncated) {
@@ -834,6 +867,7 @@ async function recordView(payload, stale) {
 // ---------------------------------------------------------------- account actions
 
 async function connect(p) {
+  sessionStorage.removeItem(PENDING_SHARE); // a plain connect never resumes an old share attempt
   try {
     await p.connect();
     toast(`${p.label} connected`);
@@ -1204,20 +1238,35 @@ async function start() {
   await providers.local.init().catch(() => {});
   try {
     const { dropbox } = providers;
-    if (await dropbox.handleRedirect()) {
-      const pending = JSON.parse(sessionStorage.getItem(PENDING_SHARE) || 'null');
+    const pending = JSON.parse(sessionStorage.getItem(PENDING_SHARE) || 'null');
+    let returned = false;
+    try {
+      returned = await dropbox.handleRedirect();
+    } catch (err) {
+      // Dropbox sent us back with an error (often: sharing permissions not ticked in the console).
       sessionStorage.removeItem(PENDING_SHARE);
-      if (pending && dropbox.canShare()) {
-        toast('Dropbox can now make share links');
+      if (pending) {
         history.replaceState(null, '', hashFor.folder(pending.pid, pending.folderId, pending.name));
-        setTimeout(() => openShareDialog(pending), 300);
+        setTimeout(() => dropboxSharingHelp(err.message, pending), 300);
+      } else throw err;
+    }
+    if (returned) {
+      sessionStorage.removeItem(PENDING_SHARE);
+      if (pending) {
+        history.replaceState(null, '', hashFor.folder(pending.pid, pending.folderId, pending.name));
+        if (dropbox.canShare()) {
+          toast('Dropbox can now make share links. Creating your record…');
+          setTimeout(() => openShareDialog(pending, { auto: true }), 300);
+        } else {
+          setTimeout(() => dropboxSharingHelp('the sharing permission wasn\'t granted', pending), 300);
+        }
       } else {
         toast('Dropbox connected');
         history.replaceState(null, '', hashFor.folder(dropbox.id, dropbox.rootId, dropbox.rootName));
       }
     }
   } catch (err) {
-    toast(err.message);
+    toast(err.message, { timeout: 8000 });
   }
   updateOnline();
   updatePlayerUi();

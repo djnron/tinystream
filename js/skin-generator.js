@@ -5,7 +5,8 @@
 // arrangement, buttons, title bar, screen, seek bar, frame, visualizer, playlist, side, width) are
 // rolled at random too, so every skin looks and is arranged differently.
 
-import { LAYOUT, validateLayout, validateTokens, WIDTH_RANGE } from './skins.js';
+import { rollArt } from './skin-art.js';
+import { LAYOUT, validateArt, validateLayout, validateTokens, WIDTH_RANGE } from './skins.js';
 
 // ---------- color helpers ----------
 
@@ -247,7 +248,8 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   const layout = rollLayout(rand, pick, previous);
   const name = `${pick(ADJECTIVES)} ${pick(NOUNS)}${pick(SUFFIXES)}`;
   const inspiredBy = [a, b].filter((s, i, all) => all.indexOf(s) === i).map((s) => ({ name: s.name, id: s.id }));
-  return { id: 'custom', name, tokens: validateTokens(tokens), layout, inspiredBy };
+  const clean = validateTokens(tokens);
+  return { id: 'custom', name, tokens: clean, layout, art: validateArt(rollArt(rand, clean)), inspiredBy };
 }
 
 /**
@@ -256,7 +258,7 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
  */
 function rollLayout(rand, pick, previous) {
   const layout = Object.fromEntries(Object.entries(LAYOUT).map(([key, options]) => [key, pick(options)]));
-  for (const key of ['shape', 'tilt', 'pattern', 'fx']) {
+  for (const key of ['shape', 'pattern', 'fx']) {
     if (layout[key] === LAYOUT[key][0] && rand() < 0.6) layout[key] = pick(LAYOUT[key].slice(1));
   }
   // Never the same deck arrangement or button style twice in a row.
@@ -264,6 +266,7 @@ function rollLayout(rand, pick, previous) {
     while (previous && layout[key] === previous[key]) layout[key] = pick(LAYOUT[key]);
   }
   layout.side = rand() < 0.35 ? 'right' : 'left';
+  layout.emblem = rand() < 0.88 ? (rand() < 0.5 ? 'top' : 'bottom') : 'none';
   layout.order = rand() < 0.25 ? 'list-first' : 'deck-first';
   const [lo, hi] = WIDTH_RANGE;
   layout.width = lo + Math.round((rand() * (hi - lo)) / 10) * 10;

@@ -5,6 +5,7 @@ import { getProvider, providers } from './providers/index.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
+import { paint as paintSkinArt } from './skin-art.js';
 import { generateSkin, museumUrl } from './skin-generator.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
 import * as visualizer from './visualizer.js';
@@ -521,6 +522,8 @@ function currentSkin() {
 function useSkin(sk) {
   store.setSetting('skin', sk.id);
   applySkin(sk);
+  // Artwork is drawn at the player's new size, so wait for the new layout to render first.
+  requestAnimationFrame(() => paintSkinArt(sk));
 }
 
 // The player's title bar shows the skin's name, like the old skinned players did.
@@ -711,7 +714,8 @@ function buildPlayerUi() {
           deckButton('repeat', 'Repeat', () => player.cycleRepeat(), 'btn-repeat', 'REP')),
         h('div', { class: 'deck-row' },
           h('span', { class: 'vol-label' }, 'VOL'), vol,
-          h('span', { class: 'deck-save', id: 'deck-save' })))),
+          h('span', { class: 'deck-save', id: 'deck-save' }))),
+      h('div', { class: 'emblem', 'aria-hidden': 'true' })),
     h('div', { class: 'window playlist' },
       h('div', { class: 'titlebar' },
         h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' })),
@@ -967,6 +971,7 @@ async function start() {
   });
   buildPlayerUi();
   applySkin(currentSkin());
+  requestAnimationFrame(() => paintSkinArt(currentSkin()));
   await store.init();
   await providers.local.init().catch(() => {});
   try {

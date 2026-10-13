@@ -64,9 +64,20 @@ button, select, input { font: inherit; color: inherit; }
   align-items: center;
   gap: 8px;
   padding: calc(6px + env(safe-area-inset-top, 0px)) 10px 6px;
-  background: var(--titlebar-bg), var(--bg);
+  /* The skin's title bar fill goes on its own layer: it may be a plain color or a gradient, and a
+     plain color can't be stacked over another background in one declaration. */
+  isolation: isolate;
+  background: var(--bg);
   color: var(--titlebar-text);
   box-shadow: var(--raised);
+}
+
+.topbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--titlebar-bg);
 }
 
 .topbar h1 {
@@ -844,16 +855,14 @@ html[data-playing][data-deck="cassette"] .reel { animation: spin 2.4s linear inf
   background: var(--lcd-dim);
   box-shadow: var(--raised), 0 4px 12px #0006;
 }
-[data-deck="split"] .deck-body > .screen { transform: rotate(-1.2deg); box-shadow: var(--sunken), 0 6px 18px #0008; }
-[data-deck="split"] .deck-body > .transport { transform: rotate(1deg) translateX(6px); justify-content: center; }
-[data-deck="split"] .deck-body > .deck-row { transform: rotate(-0.8deg) translateX(-4px); }
+[data-deck="split"] .deck-body > .screen { box-shadow: var(--sunken), 0 6px 18px #0008; }
+[data-deck="split"] .deck-body > .transport { justify-content: center; }
 [data-deck="split"] .deck-body > .seek { height: 26px; padding: 8px; background-clip: content-box; }
 [data-deck="split"] .transport .spacer { flex: 0 0 8px; }
 
 /* window silhouettes */
 [data-shape="blob"] .window { border-radius: 42px 14px 56px 18px / 20px 46px 16px 40px; }
 [data-shape="notch"] .window { clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px); }
-[data-shape="slant"] .window { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), 0 100%); padding-bottom: 14px; }
 [data-shape="arch"] .deck { border-radius: 80px 80px var(--radius) var(--radius); }
 [data-shape="arch"] .deck .titlebar { padding: 0 56px; }
 [data-shape="arch"] .deck .deck-body { padding-left: 22px; padding-right: 22px; padding-top: 16px; }
@@ -861,17 +870,6 @@ html[data-playing][data-deck="cassette"] .reel { animation: spin 2.4s linear inf
   -webkit-mask: radial-gradient(9px at 50% 100%, #0000 98%, #000) 50% calc(100% + 0px) / 26px 100% repeat-x;
   mask: radial-gradient(9px at 50% 100%, #0000 98%, #000) 50% 100% / 26px 100% repeat-x;
   padding-bottom: 10px;
-}
-
-/* tilt */
-[data-tilt="left"] .window { transform: rotate(-1.6deg); }
-[data-tilt="right"] .window { transform: rotate(1.6deg); }
-[data-tilt="wonky"] .deck { transform: rotate(-2.2deg) translateX(-3px); }
-[data-tilt="wonky"] .playlist { transform: rotate(1.8deg) translateX(4px); }
-[data-tilt]:not([data-tilt="none"]) #full { padding-top: 14px; }
-@media (max-width: 899px) {
-  [data-tilt="wonky"] .deck { transform: rotate(-1.6deg); }
-  [data-tilt="wonky"] .playlist { transform: rotate(1.4deg); }
 }
 
 /* deck textures, drawn from the skin's own bevel colors */
@@ -946,6 +944,45 @@ html[data-playing][data-fx="jelly"] .deck { animation: jelly 0.5s ease-in-out in
 @media (prefers-reduced-motion: reduce) {
   [data-fx] .window, [data-fx] .deck, [data-fx] .playlist, [data-fx] .marquee-inner, [data-fx] .tb-label, [data-fx] .titlebar::after { animation: none !important; }
 }
+
+/* ---------- generated artwork (js/skin-art.js) ----------
+   Each image is drawn at the surface's own size and layered over the skin's base colors. */
+[data-art] .deck { background: var(--art-deck, none) 0 0 / 100% 100% no-repeat, var(--deck-bg); }
+[data-art] .playlist { background: var(--art-list, none) 0 0 / 100% 100% no-repeat, var(--deck-bg); }
+[data-art] .titlebar { background: var(--art-title, none) 0 0 / 100% 100% no-repeat, var(--titlebar-bg); }
+[data-art] .screen { background: var(--art-screen, none) 0 0 / 100% 100% no-repeat, var(--lcd-bg); }
+[data-art] .deck-body::before { opacity: 0.5; }
+
+/* The emblem: a big generated logo panel above or below the controls. */
+.emblem { display: none; }
+.deck { display: flex; flex-direction: column; }
+.deck > .titlebar { order: -2; }
+[data-art][data-emblem="top"] .emblem,
+[data-art][data-emblem="bottom"] .emblem {
+  display: block;
+  height: 58px;
+  margin: 0 10px 10px;
+  background: var(--art-emblem, none) 0 0 / 100% 100% no-repeat, var(--lcd-bg);
+  border-radius: calc(var(--radius) / 2);
+  box-shadow: var(--sunken);
+}
+[data-art][data-emblem="top"] .emblem { order: -1; margin: 10px 10px 0; }
+@media (min-width: 900px) { [data-art][data-emblem] .emblem { height: 66px; } }
+
+/* Labels that sit on artwork get a small screen-colored plate, so they always read (4.5:1). */
+[data-art] .tb-label,
+[data-art] .vol-label,
+[data-art] .pl-source-label,
+[data-art] .pl-foot {
+  background: var(--lcd-bg);
+  color: var(--lcd-text);
+  padding: 2px 6px;
+  border-radius: 2px;
+  box-shadow: var(--sunken);
+  opacity: 1;
+}
+[data-art] .pl-foot { display: inline-block; margin: 0 8px 6px; padding: 1px 6px; }
+[data-art] .tb-label { line-height: 14px; }
 
 /* ---------- floating skin button: always on screen ---------- */
 

@@ -124,12 +124,27 @@ A skin has two parts, both defined in [`js/skins.js`](js/skins.js):
 | `frame` | `bevel` · `outline` (hard shadow) · `soft` · `double` |
 | `vis` | `bars` · `mirror` · `blocks` · `dots` |
 | `list` | `plain` · `zebra` · `compact` |
-| `shape` | `box` · `blob` · `notch` · `slant` · `arch` · `wave` |
-| `tilt` | `none` · `left` · `right` · `wonky` |
+| `shape` | `box` · `blob` · `notch` · `arch` · `wave` (windows always sit straight) |
 | `pattern` | `none` · `stripes` · `checker` · `polka` · `zigzag` · `plaid` · `sunburst` · `scan` |
 | `fx` | `none` · `hue-drift` · `glow` · `float` · `glitch` · `rainbow` · `jelly` (wobbles to the beat) |
 | `type` | `plain` · `wide` · `slanted` · `chunky` |
+| `emblem` | `none` · `top` · `bottom`: a big generated logo panel on the player |
 | `side`, `order`, `width` | player left or right of the library, playlist above or below it, column width 300–460 px |
+
+### Artwork
+
+Skins can also carry generated artwork (`art` in a skin file), drawn by
+[`js/skin-art.js`](js/skin-art.js) in the spirit of late-90s player skins:
+
+- **Base:** `chrome`, `plasma`, `dither`, `grid` (synthwave horizon), `contour`, `halftone`.
+- **Up to four overlays:** `rain` (falling code), `circuit`, `hexdump`, `hud`, `waves`, `stars`, `glyphs`
+  (unreadable tech text), `barcode`, `logotype` (the skin's name), `hazard`, `grille`.
+- **Extras:** optional `glitch` and corner `rivets`.
+
+Everything is drawn from the skin's own colors and a `seed`, so a skin looks the same every time and
+nothing is copied from real skins. The player, playlist, title bars, screen and emblem each get their own
+image at their own size. Labels that sit on artwork get a small screen-colored plate so they stay
+readable.
 
 Every combination has been checked to fit at phone width and on desktop. The built-in skins each use
 a different layout. To make your own:
@@ -158,6 +173,7 @@ Only colors are stored, no skin artwork. Each press of 🎲 (`js/skin-generator.
    corner radius, fonts and LCD glow.
 4. Rolls a whole layout: arrangement, buttons, title bar, screen, seek bar, frame, visualizer,
    playlist, side and width. The arrangement and button style never repeat the previous skin's.
+   It also rolls an artwork recipe; green-on-black screens lean toward code rain and hex dumps.
 5. Builds a dark or light page to match the deck.
 6. Fixes contrast so everything stays readable: at least 4.5:1 for the LCD, playlist and title text,
    and 3:1 for button icons and accents.

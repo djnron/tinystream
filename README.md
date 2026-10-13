@@ -116,8 +116,9 @@ Google's own picker window, never the rest of your Drive.
 **Adding music:** in the app, go to **Google Drive → ＋ Add music from Google Drive**.
 
 - **Picking songs:** you can pick individual songs, and shift-click selects a range.
-- **Picking a folder:** this adds the songs inside it if Google shares them with the app; if it doesn't,
-  the app tells you to open the folder and select the songs instead.
+- **Picking a folder:** this adds the songs inside it, subfolders included (confirmed with a real Drive). If
+  Google ever doesn't share a folder's contents, the app says so; open the folder and select the songs
+  instead.
 - **Collections:** what you pick is saved as a named collection in your browser (just names and ids), which
   you can pin, rename, add to, or remove. Removing it never touches your Drive.
 

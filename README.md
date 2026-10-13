@@ -21,6 +21,9 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
   spectrum or oscilloscope visualizer, beveled transport buttons, and a playlist window. Seven built-in
   skins (Deck 98, Amber Terminal, Neon Arcade, Vaporwave, Brushed Steel, Bubblegum, Clean). You can
   also load your own skin file.
+- **🎲 Skin generator.** One button (top bar, or Settings → Skin) makes a brand-new skin from the
+  palettes of real classic skins in the [Winamp Skin Museum](https://skins.webamp.org/). Every
+  generated skin gets a name and credits the museum skins it was inspired by.
 - **One layout for every screen.** On wide screens the deck and playlist sit in a column next to the
   library. On phones there's a compact bar at the bottom that opens the deck full screen.
 - Works offline for saved music and installs to the home screen or desktop.
@@ -98,6 +101,31 @@ Every color, bevel, gradient and font comes from a set of skin tokens (CSS custo
 2. Edit the values. Any CSS color, gradient, `px` size or font list works.
 3. **Load skin file…** applies it, and it stays selected.
 
+### The generator
+
+`js/skin-corpus.js` holds the color palettes of 400 classic skins from the Winamp Skin Museum, built by
+[`tools/build_skin_corpus.py`](tools/build_skin_corpus.py) through the museum's public API. For each
+skin, the script takes:
+
+- the playlist colors from its `pledit.txt`;
+- the visualizer colors from its `viscolor.txt`;
+- the title bar, frame, LCD, digit and button colors, sampled from fixed spots in its screenshot.
+
+Only colors are stored, no skin artwork. Each press of 🎲 (`js/skin-generator.js`) works like this:
+
+1. Picks a skin's palette. One time in three, it also borrows the LCD and playlist colors from a
+   second skin.
+2. Sometimes rotates all the hues, slightly or dramatically.
+3. Rolls the style: deck gradient (flat, shaded, brushed, diagonal or split), title bar style,
+   corner radius, fonts and LCD glow.
+4. Builds a dark or light page to match the deck.
+5. Fixes contrast so everything stays readable: at least 4.5:1 for the LCD, playlist and title text,
+   and 3:1 for button icons and accents.
+
+It's tested over 10,000 random skins. Undo is in the toast. To keep a generated skin, use Download skin
+template. To rebuild the palette data (for example with more skins), run
+`python3 tools/build_skin_corpus.py 600` (needs Pillow).
+
 For safety, unknown tokens are ignored, and values that could load something from the network
 (`url(...)`) are rejected. To add a built-in skin, add an entry to `SKINS` in `js/skins.js`.
 
@@ -114,6 +142,9 @@ sw.js                 service worker: caches the app so it opens offline
 css/app.css
 js/app.js             views, routing, the deck + playlist UI
 js/skins.js           skin tokens, built-in skins, skin-file loading
+js/skin-generator.js  the 🎲 generator
+js/skin-corpus.js     palettes sampled from 400 museum skins (generated, loaded on first 🎲)
+tools/build_skin_corpus.py   rebuilds skin-corpus.js from the Winamp Skin Museum API
 js/lcd.js             seven-segment LCD digits (SVG)
 js/player.js          queue, continuous play, prefetching, Media Session
 js/store.js           settings (localStorage) + saved music (IndexedDB)

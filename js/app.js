@@ -5,6 +5,7 @@ import { getProvider, providers } from './providers/index.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
+import { generateSkin, museumUrl } from './skin-generator.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
 import * as visualizer from './visualizer.js';
 
@@ -403,8 +404,18 @@ async function settingsView(stale) {
         [['off', 'Off'], ['bars', 'Spectrum bars'], ['scope', 'Oscilloscope']].map(([v, t]) =>
           h('option', { value: v, selected: s.visMode === v }, t)))));
 
+  const cur = currentSkin();
   const skinSection = h('section', { class: 'card' },
     h('h2', {}, 'Skin'),
+    h('div', { class: 'actions gen' },
+      h('button', { class: 'btn primary big', onclick: generateAndApply }, iconSpan('dice'), 'Generate a skin')),
+    h('p', { class: 'setting-desc' },
+      'Each press mixes palettes from real classic skins in the ',
+      h('a', { href: 'https://skins.webamp.org/', target: '_blank', rel: 'noopener' }, 'Winamp Skin Museum'),
+      ' into a new design.'),
+    cur.inspiredBy?.length ? h('p', { class: 'setting-desc inspired' }, `“${cur.name}” is inspired by `,
+      cur.inspiredBy.map((src, i) => [i ? ' + ' : '',
+        h('a', { href: museumUrl(src.id), target: '_blank', rel: 'noopener' }, src.name)])) : null,
     h('div', { class: 'skins' }, allSkins().map((sk) => skinSwatch(sk))),
     h('div', { class: 'actions' },
       h('label', { class: 'btn' }, 'Load skin file…',
@@ -462,6 +473,38 @@ function skinSwatch(sk) {
   h('span', { class: 'sw-name' }, sk.name));
   for (const [k, v] of Object.entries({ ...TOKENS, ...sk.tokens })) el.style.setProperty(`--${k}`, v);
   return el;
+}
+
+/** The one-button generator: roll a new skin, apply it, and offer an undo. */
+let generating = false;
+let genToast = null;
+async function generateAndApply() {
+  if (generating) return;
+  generating = true;
+  const before = { skin: store.settings.skin, customSkin: store.settings.customSkin };
+  try {
+    const sk = await generateSkin();
+    store.setSetting('customSkin', sk);
+    useSkin(sk);
+    const from = sk.inspiredBy.map((src) => src.name).join(' + ');
+    genToast?.remove();
+    genToast = toast(`🎲 ${sk.name} — inspired by ${from}`, {
+      timeout: 6000,
+      action: {
+        label: 'Undo',
+        run: () => {
+          store.setSetting('customSkin', before.customSkin);
+          useSkin(allSkins().find((x) => x.id === before.skin) || SKINS[0]);
+          if (location.hash === hashFor.settings()) render();
+        },
+      },
+    });
+    if (location.hash === hashFor.settings()) render();
+  } catch (err) {
+    toast(`Couldn't generate a skin: ${err.message}`);
+  } finally {
+    generating = false;
+  }
 }
 
 async function loadSkinFile(e) {
@@ -805,6 +848,8 @@ window.addEventListener('hashchange', render);
 async function start() {
   $('#back').innerHTML = icons.back;
   $('#settings-link').innerHTML = icons.settings;
+  $('#gen-skin').innerHTML = icons.dice;
+  $('#gen-skin').addEventListener('click', generateAndApply);
   applySkin(currentSkin());
   buildPlayerUi();
   await store.init();

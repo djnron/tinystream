@@ -186,6 +186,10 @@ body.full-open #full { display: flex; }
 .btn .ico { display: inline-grid; }
 .btn.primary { background: var(--accent); color: var(--accent-text); }
 .btn.danger { color: var(--danger); }
+.btn.big { padding: 12px 22px; font-size: 1.05rem; }
+.btn.big svg { width: 22px; height: 22px; }
+.actions.gen { padding: 12px 0 4px; }
+.inspired { margin-top: 6px; }
 .btn:disabled { opacity: 0.45; cursor: default; }
 
 .link { background: none; border: 0; color: var(--accent); font-weight: 600; cursor: pointer; padding: 0 0 0 12px; }
@@ -659,4 +663,4 @@ input[role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-o
   pointer-events: auto;
 }
 
-.toast .link { color: var(--vis-high); }
+.toast .link { color: inherit; text-decoration: underline; }

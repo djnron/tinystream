@@ -142,8 +142,14 @@ export function parseSkinFile(text) {
   if (!data || typeof data !== 'object' || typeof data.tokens !== 'object') {
     throw new Error('A skin file needs a "tokens" object — download the template to see the format');
   }
+  const name = String(data.name || 'My skin').slice(0, MAX_NAME);
+  return { id: 'custom', name, tokens: validateTokens(data.tokens) };
+}
+
+/** Keeps known tokens only and rejects values that could load anything (no url()). */
+export function validateTokens(input) {
   const tokens = {};
-  for (const [key, value] of Object.entries(data.tokens)) {
+  for (const [key, value] of Object.entries(input)) {
     if (!(key in TOKENS)) continue;
     const v = String(value).trim();
     if (v.length > 300 || !SAFE_VALUE.test(v) || /url\s*\(|expression|image-set/i.test(v)) {
@@ -151,8 +157,7 @@ export function parseSkinFile(text) {
     }
     tokens[key] = v;
   }
-  const name = String(data.name || 'My skin').slice(0, MAX_NAME);
-  return { id: 'custom', name, tokens };
+  return tokens;
 }
 
 export function skinTemplate(base) {

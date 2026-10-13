@@ -57,7 +57,8 @@ async function render() {
 }
 
 function setTitle(text) {
-  $('#title').textContent = text;
+  // The logo already says Music Box, so the home screen's title shows the sections instead.
+  $('#title').textContent = text === 'Music Box' ? 'Home' : text;
   document.title = text === 'Music Box' ? text : `${text} · Music Box`;
 }
 

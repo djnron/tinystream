@@ -460,6 +460,17 @@ function draw(art, p, w, h, seedOffset, strength = 1) {
 
 const toUrl = (canvas) => new Promise((resolve) => canvas.toBlob((b) => resolve(b ? URL.createObjectURL(b) : null)));
 
+/** A second document the player may live in (the pop-out window); sizes are measured there too. */
+let otherDoc = null;
+export function setOtherDocument(doc) {
+  otherDoc = doc;
+}
+
+/** Redraw the current skin's artwork at the surfaces' current sizes (e.g. after zooming). */
+export function repaint() {
+  if (current) paint(current);
+}
+
 let urls = [];
 let current = null;
 let observer = null;
@@ -480,7 +491,7 @@ export async function paint(skin) {
   }
   const p = palette(skin.tokens, skin.name);
   const size = (sel, fw, fh) => {
-    const el = document.querySelector(sel);
+    const el = document.querySelector(sel) || otherDoc?.querySelector(sel);
     const rect = el?.getBoundingClientRect();
     return [Math.round(rect?.width || fw), Math.round(rect?.height || fh)];
   };

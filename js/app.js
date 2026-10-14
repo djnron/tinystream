@@ -1303,6 +1303,11 @@ async function popOut() {
   // The deck and playlist keep all their buttons and listeners when moved.
   popDoc.body.append(deck, ...[list].filter(Boolean));
   if (list) syncSongButtons(list);
+  popDoc.body.append(h('div', { class: 'fit-space' },
+    h('button', { class: 'btn', onclick: fitPopToContent }, iconSpan('unstage'), 'Fit window')));
+  // Any first click in the window counts as permission to resize it, so tidy up then.
+  popDoc.addEventListener('pointerdown', () => { if (popSpare() > 24) fitPopToContent(); }, { capture: true });
+  popWin.addEventListener('resize', debounce(updateSpare, 100));
   fitPopToContent();
   setOtherDocument(popDoc);
   full.prepend(h('div', { class: 'popped-note' },
@@ -1375,19 +1380,34 @@ function toggleSongs(open) {
   }
 }
 
-/** Sizes the pop-out window to exactly the player (plus the song list when it's open). */
-function fitPopToContent() {
-  if (!popWin) return;
+/** How much taller the pop-out window is than the folded player (0 when it fits or the list is open). */
+function popSpare() {
+  if (!popWin) return 0;
   const deck = popDoc.querySelector('.deck');
   const list = popDoc.querySelector('.playlist');
-  if (!deck) return;
+  if (!deck || !list?.classList.contains('folded')) return 0;
+  const used = deck.getBoundingClientRect().height + list.getBoundingClientRect().height;
+  return Math.max(0, Math.floor(popWin.innerHeight - used));
+}
+
+/** Shows the "Fit window" button when there's spare room under the folded player. */
+function updateSpare() {
+  if (!popDoc) return;
+  popDoc.body.classList.toggle('has-spare', popSpare() > 24);
+}
+
+/**
+ * Sizes the pop-out window to the folded player. Browsers only allow resizing from a click inside
+ * the window, so this is tried on open (may be refused) and again on the first click in it.
+ */
+function fitPopToContent() {
+  if (!popWin) return;
   popWin.requestAnimationFrame(() => {
-    const listH = list ? (list.classList.contains('folded') ? list.getBoundingClientRect().height : Math.max(240, list.getBoundingClientRect().height)) : 0;
-    const needed = Math.ceil(deck.getBoundingClientRect().height + listH);
-    const diff = needed - popWin.innerHeight;
-    if (Math.abs(diff) > 2) {
-      try { popWin.resizeBy(0, diff); } catch { /* the browser decides */ }
+    const spare = popSpare();
+    if (spare > 2) {
+      try { popWin.resizeBy(0, -spare); } catch { /* not allowed without a click; the Fit button stays */ }
     }
+    popWin.setTimeout(updateSpare, 150);
   });
 }
 

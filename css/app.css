@@ -1107,8 +1107,19 @@ body.popout #btn-popout { display: grid; }
 
 /* ---------- popped out ---------- */
 
-body.popout { margin: 0; min-height: 100vh; background: var(--bg); overflow: hidden; }
-body.popout .deck { width: 100%; max-width: none; min-height: 100vh; margin: 0; border-radius: 0; box-shadow: none; }
+/* In the pop-out window: the deck on top, the song list fills the rest and scrolls on its own. */
+body.popout { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+body.popout .window { width: 100%; max-width: none; margin: 0; border-radius: 0; box-shadow: none; }
+body.popout .deck { flex: none; }
+body.popout .playlist { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body.popout .playlist .pl { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+
+/* Folding the playlist leaves just its title bar. */
+.pl-fold { display: none; transition: transform 0.15s; }
+body.popout .pl-fold { display: grid; }
+.playlist.folded .pl-fold { transform: rotate(180deg); }
+.playlist.folded .pl, .playlist.folded .pl-source, .playlist.folded .pl-foot { display: none; }
+body.popout .playlist.folded { flex: none; }
 body.popped #full .playlist { flex: 1; }
 .popped-note { display: grid; gap: 10px; justify-items: center; padding: 18px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--raised); text-align: center; color: var(--muted); }
 .popped-note p { margin: 0; }

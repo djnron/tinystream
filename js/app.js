@@ -987,7 +987,25 @@ function buildPlayerUi() {
       h('div', { class: 'emblem', 'aria-hidden': 'true' })),
     h('div', { class: 'window playlist' },
       h('div', { class: 'titlebar' },
-        h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' })),
+        h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' }),
+        h('span', { class: 'tb-tools' },
+          h('button', {
+            class: 'tb-btn pl-fold', title: 'Fold the playlist away', 'aria-label': 'Fold playlist', 'aria-expanded': 'true', html: icons.down,
+            onclick: (e) => {
+              const pl = e.currentTarget.closest('.playlist');
+              const before = pl.getBoundingClientRect().height;
+              const folded = pl.classList.toggle('folded');
+              // In the pop-out window, shrink or grow the window to match instead of leaving a gap.
+              const win = pl.ownerDocument.defaultView;
+              if (win !== window) {
+                if (folded) pl.dataset.openHeight = String(Math.round(before));
+                const delta = folded ? pl.getBoundingClientRect().height - before : Number(pl.dataset.openHeight || 240) - pl.getBoundingClientRect().height;
+                try { win.resizeBy(0, Math.round(delta)); } catch { /* the browser decides */ }
+              }
+              e.currentTarget.setAttribute('aria-expanded', String(!folded));
+              e.currentTarget.title = folded ? 'Show the playlist' : 'Fold the playlist away';
+            },
+          }))),
       h('label', { class: 'pl-source' },
         h('span', { class: 'pl-source-label' }, 'FOLDER'),
         h('select', { id: 'pl-source', 'aria-label': 'Switch music folder', onchange: onSourcePick })),
@@ -1252,7 +1270,8 @@ async function popOut() {
   if (!deck || popWin) return;
   const rect = deck.getBoundingClientRect();
   const width = Math.round(Math.max(320, rect.width / (parseFloat(document.documentElement.style.getPropertyValue('--stage-zoom')) || 1)));
-  const height = Math.round(Math.max(260, deck.scrollHeight));
+  // Room for the deck plus a scrolling song list underneath.
+  const height = Math.round(Math.max(260, deck.scrollHeight) + 240);
   let win;
   try {
     win = 'documentPictureInPicture' in window
@@ -1288,7 +1307,8 @@ async function popOut() {
   rootSync = new MutationObserver(syncPopRoot);
   rootSync.observe(document.documentElement, { attributes: true });
   popDoc.body.className = 'popout';
-  popDoc.body.append(deck); // the deck keeps all its buttons and listeners
+  // The deck and playlist keep all their buttons and listeners when moved.
+  popDoc.body.append(deck, ...[full.querySelector('.playlist')].filter(Boolean));
   setOtherDocument(popDoc);
   full.prepend(h('div', { class: 'popped-note' },
     h('p', {}, 'The player is in its own window.'),
@@ -1307,12 +1327,14 @@ async function popOut() {
 function popIn() {
   if (!popWin) return;
   const deck = popDoc.querySelector('.deck');
+  const list = popDoc.querySelector('.playlist');
   const win = popWin;
   popWin = null;
   popDoc = null;
   rootSync?.disconnect();
   setOtherDocument(null);
   full.querySelector('.popped-note')?.remove();
+  if (list) full.prepend(list);
   if (deck) full.prepend(deck);
   document.body.classList.remove('popped');
   try { win.close(); } catch { /* already closed */ }

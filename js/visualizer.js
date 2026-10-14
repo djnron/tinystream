@@ -42,13 +42,15 @@ window.addEventListener('skinchange', readColors);
  */
 export function run(canvas, getMode) {
   const g = canvas.getContext('2d');
+  // Use the canvas's own window, so it keeps animating when the deck is popped out into another one.
+  const win = canvas.ownerDocument.defaultView || window;
   let raf = 0;
   let peaks = [];
   let levels = [];
   if (!colors.low) readColors();
 
   const frame = () => {
-    raf = requestAnimationFrame(frame);
+    raf = win.requestAnimationFrame(frame);
     const w = Math.max(8, Math.floor(canvas.clientWidth / PIXEL));
     const h = Math.max(6, Math.floor(canvas.clientHeight / PIXEL));
     if (canvas.width !== w || canvas.height !== h) {
@@ -126,5 +128,5 @@ export function run(canvas, getMode) {
     }
   };
   frame();
-  return () => cancelAnimationFrame(raf);
+  return () => win.cancelAnimationFrame(raf);
 }

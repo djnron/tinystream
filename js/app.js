@@ -6,14 +6,18 @@ import { createRecord, downloadUrl, myRecords, openRecord, sharedSource, stopSha
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
-import { paint as paintSkinArt } from './skin-art.js';
+import { paint as paintSkinArt, repaint as repaintSkinArt, setOtherDocument } from './skin-art.js';
 import { generateSkin, museumUrl } from './skin-generator.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
 import * as visualizer from './visualizer.js';
 
 const player = new Player();
 registerHidden(sharedSource);
-const $ = (sel) => document.querySelector(sel);
+// The pop-out player window, when the deck has been popped out of the page (see "stage mode and pop-out").
+let popWin = null;
+let popDoc = null;
+// Looks in the page, then in the pop-out player window if the deck lives there.
+const $ = (sel) => document.querySelector(sel) || popDoc?.querySelector(sel);
 const view = $('#view');
 let renderSeq = 0;
 
@@ -557,7 +561,7 @@ function useSkin(sk) {
 
 // The player's title bar shows the skin's name, like the old skinned players did.
 window.addEventListener('skinchange', () => {
-  const label = document.getElementById('deck-label');
+  const label = $('#deck-label'); // may be in the pop-out window
   if (label) label.textContent = (recordSkin || currentSkin()).name.toUpperCase();
 });
 
@@ -909,7 +913,7 @@ let shownQueue = null;
 let shownTrackId = null;
 const lcdCache = new Map(); // element -> last text drawn, so digits only re-render when they change
 
-const deckVisible = () => wide.matches || document.body.classList.contains('full-open');
+const deckVisible = () => Boolean(popWin) || wide.matches || document.body.classList.contains('full-open');
 
 /** Transport button: an icon, plus a text label that "labels" skins show instead. */
 function deckButton(name, label, onclick, id, text) {
@@ -942,7 +946,10 @@ function buildPlayerUi() {
     h('div', { class: 'window deck' },
       h('div', { class: 'titlebar' },
         h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label', id: 'deck-label' }, 'MUSIC BOX'), h('span', { class: 'tb-grip' }),
-        h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull })),
+        h('span', { class: 'tb-tools' },
+          h('button', { class: 'tb-btn', id: 'btn-stage', title: 'Stage mode: make the player fill the page (F)', 'aria-label': 'Stage mode', html: icons.stage, onclick: () => setStage(!store.settings.stage) }),
+          canPopOut() && h('button', { class: 'tb-btn', id: 'btn-popout', title: 'Pop out: float the player above other windows', 'aria-label': 'Pop out player', html: icons.popout, onclick: () => (popWin ? popIn() : popOut()) }),
+          h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull }))),
       // Every part of the deck is a direct grid item, so skins can arrange them freely (see the
       // [data-deck] rules in css/app.css). Speakers and reels only show in the layouts that use them.
       h('div', { class: 'deck-body' },
@@ -1001,14 +1008,15 @@ function setMarquee(text) {
   box.classList.remove('scroll');
   box.replaceChildren(h('span', { class: 'marquee-inner' }, text));
   // Scroll only when the text doesn't fit, Winamp-style, with a separator between loops.
-  requestAnimationFrame(() => {
+  // (A timer, not an animation frame: those pause when the page's tab is hidden but the deck is popped out.)
+  setTimeout(() => {
     const inner = box.firstChild;
     if (!inner || inner.scrollWidth <= box.clientWidth) return;
     const loop = `${text}  ***  `;
     inner.textContent = loop + loop;
     inner.style.animationDuration = `${Math.max(6, loop.length * 0.22)}s`;
     box.classList.add('scroll');
-  });
+  }, 0);
 }
 
 function updatePlayerUi() {
@@ -1168,6 +1176,177 @@ function closeFull() {
   syncViz();
 }
 
+// ---------------------------------------------------------------- stage mode and pop-out
+//
+// Stage: the player fills the page (scaled up with CSS zoom) and the library slides in as a drawer.
+// Pop-out: the deck moves into its own small window. In Chrome and Edge that window stays on top of
+// everything (Document Picture-in-Picture); elsewhere it's an ordinary pop-up window.
+
+const stageQuery = matchMedia('(min-width: 900px)');
+const isStage = () => Boolean(store.settings.stage) && stageQuery.matches && !popWin;
+
+function setStage(on) {
+  store.setSetting('stage', on);
+  applyStage();
+  toast(on ? 'Stage mode: the library is in the drawer (☰ Library, or press L)' : 'Stage mode off', { timeout: 2500 });
+}
+
+function applyStage() {
+  const on = isStage();
+  document.body.classList.toggle('stage', on);
+  if (!on) document.body.classList.remove('drawer-open');
+  const btn = $('#btn-stage');
+  if (btn) {
+    btn.innerHTML = on ? icons.unstage : icons.stage;
+    btn.title = on ? 'Leave stage mode (F)' : 'Stage mode: make the player fill the page (F)';
+  }
+  $('#library-toggle').hidden = !on;
+  fitStage();
+}
+
+/** Scales the deck and playlist to fill the stage, keeping them crisp (zoom re-lays out, it doesn't blur). */
+function fitStage() {
+  const deck = full.querySelector('.deck');
+  const list = full.querySelector('.playlist');
+  const root = document.documentElement;
+  if (!isStage() || !deck) {
+    root.style.removeProperty('--stage-zoom');
+    if (list) list.style.removeProperty('height');
+    requestAnimationFrame(repaintSkinArt);
+    return;
+  }
+  root.style.setProperty('--stage-zoom', '1');
+  list.style.removeProperty('height');
+  const natural = deck.getBoundingClientRect();
+  list.style.height = `${Math.round(natural.height)}px`; // playlist matches the deck's height
+  const top = document.querySelector('.topbar').getBoundingClientRect().height;
+  root.style.setProperty('--topbar-h', `${Math.round(top)}px`);
+  const availW = innerWidth - 96;
+  const availH = innerHeight - top - 64;
+  const zoom = Math.max(1, Math.min(2.6, availW / (natural.width * 2 + 24), availH / natural.height));
+  root.style.setProperty('--stage-zoom', zoom.toFixed(3));
+  requestAnimationFrame(repaintSkinArt);
+}
+
+function toggleDrawer(open = !document.body.classList.contains('drawer-open')) {
+  document.body.classList.toggle('drawer-open', open && isStage());
+}
+
+// ---- pop-out
+
+let rootSync = null;
+
+const canPopOut = () => 'documentPictureInPicture' in window || !matchMedia('(pointer: coarse)').matches;
+
+/** Copies the page's skin (CSS variables and data-* layout attributes) onto the pop-out window. */
+function syncPopRoot() {
+  if (!popDoc) return;
+  const from = document.documentElement;
+  const to = popDoc.documentElement;
+  for (const { name } of [...to.attributes]) if (!from.hasAttribute(name)) to.removeAttribute(name);
+  for (const { name, value } of [...from.attributes]) to.setAttribute(name, value);
+}
+
+async function popOut() {
+  const deck = full.querySelector('.deck');
+  if (!deck || popWin) return;
+  const rect = deck.getBoundingClientRect();
+  const width = Math.round(Math.max(320, rect.width / (parseFloat(document.documentElement.style.getPropertyValue('--stage-zoom')) || 1)));
+  const height = Math.round(Math.max(260, deck.scrollHeight));
+  let win;
+  try {
+    win = 'documentPictureInPicture' in window
+      ? await window.documentPictureInPicture.requestWindow({ width, height })
+      : window.open('', 'music-box-player', `popup,width=${width},height=${height}`);
+  } catch (err) {
+    toast(`Couldn't pop out the player: ${err.message}`);
+    return;
+  }
+  if (!win) {
+    toast('Your browser blocked the pop-out window. Allow pop-ups for this site and try again.');
+    return;
+  }
+  popWin = win;
+  popDoc = win.document;
+  popDoc.title = 'Music Box';
+  // Same styles as the page: copy our stylesheet's rules in (a <link> isn't reliably applied in a
+  // picture-in-picture window), plus the skin's variables and layout attributes.
+  for (const sheet of document.styleSheets) {
+    try {
+      const style = popDoc.createElement('style');
+      style.textContent = [...sheet.cssRules].map((rule) => rule.cssText).join('\n');
+      popDoc.head.append(style);
+    } catch {
+      if (!sheet.href) continue;
+      const link = popDoc.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = sheet.href;
+      popDoc.head.append(link);
+    }
+  }
+  syncPopRoot();
+  rootSync = new MutationObserver(syncPopRoot);
+  rootSync.observe(document.documentElement, { attributes: true });
+  popDoc.body.className = 'popout';
+  popDoc.body.append(deck); // the deck keeps all its buttons and listeners
+  setOtherDocument(popDoc);
+  full.prepend(h('div', { class: 'popped-note' },
+    h('p', {}, 'The player is in its own window.'),
+    h('button', { class: 'btn', onclick: popIn }, iconSpan('popin'), 'Bring it back')));
+  popWin.addEventListener('pagehide', popIn, { once: true });
+  popWin.addEventListener('resize', debounce(() => repaintSkinArt(), 250));
+  popDoc.addEventListener('keydown', onKey);
+  document.body.classList.add('popped');
+  updatePopButton();
+  applyStage();
+  restartViz();
+  updatePlayerUi();
+  requestAnimationFrame(repaintSkinArt);
+}
+
+function popIn() {
+  if (!popWin) return;
+  const deck = popDoc.querySelector('.deck');
+  const win = popWin;
+  popWin = null;
+  popDoc = null;
+  rootSync?.disconnect();
+  setOtherDocument(null);
+  full.querySelector('.popped-note')?.remove();
+  if (deck) full.prepend(deck);
+  document.body.classList.remove('popped');
+  try { win.close(); } catch { /* already closed */ }
+  updatePopButton();
+  applyStage();
+  restartViz();
+  updatePlayerUi();
+  requestAnimationFrame(repaintSkinArt);
+}
+
+function updatePopButton() {
+  const btn = $('#btn-popout');
+  if (!btn) return;
+  btn.innerHTML = popWin ? icons.popin : icons.popout;
+  btn.title = popWin ? 'Put the player back in the page' : 'Pop out: float the player above other windows';
+}
+
+/** The visualizer must run on the animation clock of whichever window the deck is in. */
+function restartViz() {
+  stopViz?.();
+  stopViz = null;
+  syncViz();
+}
+
+function debounce(fn, ms) {
+  let t = 0;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+stageQuery.addEventListener('change', applyStage);
+window.addEventListener('resize', debounce(fitStage, 150));
+window.addEventListener('skinchange', () => setTimeout(fitStage, 50));
+window.addEventListener('hashchange', () => { if (isStage()) toggleDrawer(true); });
+
 // ---------------------------------------------------------------- wiring
 
 player.addEventListener('change', () => {
@@ -1197,10 +1376,13 @@ document.addEventListener('click', () => {
   }
 }, { capture: true });
 
-document.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey) return;
+document.addEventListener('keydown', onKey);
+function onKey(e) {
+  if (e.target.closest?.('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'f' || e.key === 'F') { e.preventDefault(); setStage(!store.settings.stage); return; }
+  if ((e.key === 'l' || e.key === 'L') && isStage()) { e.preventDefault(); toggleDrawer(); return; }
   if (e.code === 'Space' && player.current) { e.preventDefault(); player.toggle(); }
-  if (e.key === 'Escape') closeFull();
+  if (e.key === 'Escape') { closeFull(); toggleDrawer(false); }
   // Classic keyboard layout: z x c v b = previous, play, pause, stop, next.
   const keys = {
     z: () => player.prev(),
@@ -1210,7 +1392,7 @@ document.addEventListener('keydown', (e) => {
     b: () => player.next(),
   };
   keys[e.key.toLowerCase()]?.();
-});
+}
 
 function updateOnline() {
   $('#offline').hidden = navigator.onLine;
@@ -1271,6 +1453,9 @@ async function start() {
   updateOnline();
   updatePlayerUi();
   syncViz();
+  $('#library-toggle').innerHTML = `${icons.library}<span>Library</span>`;
+  $('#library-toggle').addEventListener('click', () => toggleDrawer());
+  applyStage();
   render();
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker failed', err));

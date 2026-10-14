@@ -1053,6 +1053,66 @@ body:not(.has-track) .fab { bottom: calc(16px + var(--safe-b)); }
 .pin-list .row:last-child { border-bottom: 0; }
 .ico.badge.local { color: var(--accent); }
 
+/* ---------- title bar tools (stage, pop out) ---------- */
+
+.tb-tools { display: flex; gap: 4px; align-items: center; }
+#btn-stage, #btn-popout { display: none; }
+@media (min-width: 900px) { #btn-stage, #btn-popout { display: grid; } }
+[data-titlebar="slim"] .tb-tools { position: absolute; top: 10px; right: 10px; z-index: 2; }
+body.popout #btn-stage, body.popout #deck-close { display: none; }
+body.popout #btn-popout { display: grid; }
+
+/* ---------- stage mode (wide screens): the player fills the page, the library is a drawer ---------- */
+
+.lib-btn { padding: 6px 12px; }
+.lib-btn svg { width: 18px; height: 18px; }
+
+@media (min-width: 900px) {
+  body.stage .layout { display: block; max-width: none; padding: 0; }
+  body.stage #full {
+    position: fixed;
+    top: var(--topbar-h, 56px);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 24px;
+    overflow: hidden;
+  }
+  body.stage #full > .window { zoom: var(--stage-zoom, 1); width: var(--deck-w); max-width: none; margin: 0; flex: none; }
+  body.stage #full > .playlist .pl { max-height: none; min-height: 0; }
+  body.stage main {
+    position: fixed;
+    top: var(--topbar-h, 56px);
+    right: 0;
+    bottom: 0;
+    z-index: 22;
+    width: min(560px, 92vw);
+    overflow-y: auto;
+    padding-top: 16px;
+    background: var(--bg);
+    box-shadow: -12px 0 40px #000a;
+    transform: translateX(105%);
+    transition: transform 0.25s ease;
+  }
+  body.stage.drawer-open main { transform: none; }
+  body.stage.drawer-open .lib-btn { background: var(--lcd-bg); color: var(--lcd-text); }
+}
+
+@media (prefers-reduced-motion: reduce) { body.stage main { transition: none; } }
+
+/* ---------- popped out ---------- */
+
+body.popout { margin: 0; min-height: 100vh; background: var(--bg); overflow: hidden; }
+body.popout .deck { width: 100%; max-width: none; min-height: 100vh; margin: 0; border-radius: 0; box-shadow: none; }
+body.popped #full .playlist { flex: 1; }
+.popped-note { display: grid; gap: 10px; justify-items: center; padding: 18px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--raised); text-align: center; color: var(--muted); }
+.popped-note p { margin: 0; }
+
 /* ---------- mini player (phones) ---------- */
 
 #mini {

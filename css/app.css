@@ -1111,10 +1111,6 @@ body.popout #btn-popout { display: grid; }
 body.popout { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
 body.popout .window { width: 100%; max-width: none; margin: 0; border-radius: 0; box-shadow: none; }
 body.popout .deck { flex: none; }
-/* If the browser opens the window taller than the player (Chrome reuses the last size), a
-   "Fit window" button sits in the spare space; any first click also shrinks it to fit. */
-.fit-space { display: none; }
-body.popout.has-spare .fit-space { flex: 1; display: grid; place-items: center; }
 body.popout .playlist.folded { flex: none; }
 body.popout .playlist { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 body.popout .playlist .pl { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }

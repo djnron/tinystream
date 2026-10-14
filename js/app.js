@@ -1259,16 +1259,17 @@ async function popOut() {
   if (!deck || popWin) return;
   const rect = deck.getBoundingClientRect();
   const width = Math.round(Math.max(320, rect.width / (parseFloat(document.documentElement.style.getPropertyValue('--stage-zoom')) || 1)));
-  // The pop-out opens as just the player; the song list starts folded (the SONGS button opens it).
+  // The pop-out opens as just the player (song list folded) unless the list was open last time.
   const list = full.querySelector('.playlist');
-  list?.classList.add('folded');
+  list?.classList.toggle('folded', !store.settings.popSongs);
   const barH = list ? list.getBoundingClientRect().height : 0;
   const height = Math.round(Math.max(260, deck.scrollHeight) + barH);
   let win;
   try {
     win = 'documentPictureInPicture' in window
-      // preferInitialWindowPlacement: use this size, not the size Chrome remembers from last time.
-      ? await window.documentPictureInPicture.requestWindow({ width, height, preferInitialWindowPlacement: true })
+      // Chrome reopens the window at the size it had when last closed (only the first time is this
+      // size used). Opening with the song list in the same state it was left in keeps the two matched.
+      ? await window.documentPictureInPicture.requestWindow({ width, height })
       : window.open('', 'music-box-player', `popup,width=${width},height=${height}`);
   } catch (err) {
     toast(`Couldn't pop out the player: ${err.message}`);
@@ -1303,11 +1304,9 @@ async function popOut() {
   // The deck and playlist keep all their buttons and listeners when moved.
   popDoc.body.append(deck, ...[list].filter(Boolean));
   if (list) syncSongButtons(list);
-  popDoc.body.append(h('div', { class: 'fit-space' },
-    h('button', { class: 'btn', onclick: fitPopToContent }, iconSpan('unstage'), 'Fit window')));
-  // Any first click in the window counts as permission to resize it, so tidy up then.
+  // If the window still opens taller than the folded player, the first click in it (which is what
+  // lets a page resize its window) quietly shrinks it to fit. Chrome then remembers that size.
   popDoc.addEventListener('pointerdown', () => { if (popSpare() > 24) fitPopToContent(); }, { capture: true });
-  popWin.addEventListener('resize', debounce(updateSpare, 100));
   fitPopToContent();
   setOtherDocument(popDoc);
   full.prepend(h('div', { class: 'popped-note' },
@@ -1368,6 +1367,7 @@ function toggleSongs(open) {
   pl.classList.toggle('folded', !show);
   syncSongButtons(pl);
   const win = pl.ownerDocument.defaultView;
+  if (win !== window) store.setSetting('popSongs', show); // reopen the pop-out the same way next time
   if (win !== window && show === wasFolded) {
     if (!show) pl.dataset.openHeight = String(Math.round(before));
     const after = pl.getBoundingClientRect().height;
@@ -1390,12 +1390,6 @@ function popSpare() {
   return Math.max(0, Math.floor(popWin.innerHeight - used));
 }
 
-/** Shows the "Fit window" button when there's spare room under the folded player. */
-function updateSpare() {
-  if (!popDoc) return;
-  popDoc.body.classList.toggle('has-spare', popSpare() > 24);
-}
-
 /**
  * Sizes the pop-out window to the folded player. Browsers only allow resizing from a click inside
  * the window, so this is tried on open (may be refused) and again on the first click in it.
@@ -1405,9 +1399,8 @@ function fitPopToContent() {
   popWin.requestAnimationFrame(() => {
     const spare = popSpare();
     if (spare > 2) {
-      try { popWin.resizeBy(0, -spare); } catch { /* not allowed without a click; the Fit button stays */ }
+      try { popWin.resizeBy(0, -spare); } catch { /* not allowed without a click; tried again on the first one */ }
     }
-    popWin.setTimeout(updateSpare, 150);
   });
 }
 

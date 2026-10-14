@@ -1114,10 +1114,21 @@ body.popout .deck { flex: none; }
 body.popout .playlist { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 body.popout .playlist .pl { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
 
-/* Folding the playlist leaves just its title bar. */
-.pl-fold { display: none; transition: transform 0.15s; }
-body.popout .pl-fold { display: grid; }
-.playlist.folded .pl-fold { transform: rotate(180deg); }
+/* Folding the playlist leaves just its title bar (pop-out only). */
+.pl-fold, #btn-songs { display: none !important; }
+body.popout .pl-fold, body.popout #btn-songs {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 3px;
+  width: auto;
+  padding: 0 6px;
+  font: 700 9px/1 var(--font-ui);
+  letter-spacing: 0.12em;
+}
+body.popout .pl-fold svg, body.popout #btn-songs svg { width: 12px; height: 12px; }
+#btn-songs.on { background: var(--lcd-bg); color: var(--lcd-text); }
+.playlist.folded .pl-fold .btn-ico { transform: rotate(180deg); }
+
 .playlist.folded .pl, .playlist.folded .pl-source, .playlist.folded .pl-foot { display: none; }
 body.popout .playlist.folded { flex: none; }
 body.popped #full .playlist { flex: 1; }

@@ -948,6 +948,8 @@ function buildPlayerUi() {
         h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label', id: 'deck-label' }, 'MUSIC BOX'), h('span', { class: 'tb-grip' }),
         h('span', { class: 'tb-tools' },
           h('button', { class: 'tb-btn', id: 'btn-stage', title: 'Stage mode: make the player fill the page (F)', 'aria-label': 'Stage mode', html: icons.stage, onclick: () => setStage(!store.settings.stage) }),
+          h('button', { class: 'tb-btn', id: 'btn-songs', title: 'Show the song list', 'aria-label': 'Show the song list', 'aria-expanded': 'false', onclick: () => toggleSongs() },
+            h('span', { class: 'btn-ico', html: icons.library }), h('span', {}, 'SONGS')),
           canPopOut() && h('button', { class: 'tb-btn', id: 'btn-popout', title: 'Pop out: float the player above other windows', 'aria-label': 'Pop out player', html: icons.popout, onclick: () => (popWin ? popIn() : popOut()) }),
           h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull }))),
       // Every part of the deck is a direct grid item, so skins can arrange them freely (see the
@@ -990,22 +992,9 @@ function buildPlayerUi() {
         h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' }),
         h('span', { class: 'tb-tools' },
           h('button', {
-            class: 'tb-btn pl-fold', title: 'Fold the playlist away', 'aria-label': 'Fold playlist', 'aria-expanded': 'true', html: icons.down,
-            onclick: (e) => {
-              const pl = e.currentTarget.closest('.playlist');
-              const before = pl.getBoundingClientRect().height;
-              const folded = pl.classList.toggle('folded');
-              // In the pop-out window, shrink or grow the window to match instead of leaving a gap.
-              const win = pl.ownerDocument.defaultView;
-              if (win !== window) {
-                if (folded) pl.dataset.openHeight = String(Math.round(before));
-                const delta = folded ? pl.getBoundingClientRect().height - before : Number(pl.dataset.openHeight || 240) - pl.getBoundingClientRect().height;
-                try { win.resizeBy(0, Math.round(delta)); } catch { /* the browser decides */ }
-              }
-              e.currentTarget.setAttribute('aria-expanded', String(!folded));
-              e.currentTarget.title = folded ? 'Show the playlist' : 'Fold the playlist away';
-            },
-          }))),
+            class: 'tb-btn pl-fold', title: 'Fold the songs away', 'aria-label': 'Fold the song list', 'aria-expanded': 'true',
+            onclick: () => toggleSongs(),
+          }, h('span', { class: 'btn-ico', html: icons.down }), h('span', { class: 'fold-txt' }, 'HIDE')))),
       h('label', { class: 'pl-source' },
         h('span', { class: 'pl-source-label' }, 'FOLDER'),
         h('select', { id: 'pl-source', 'aria-label': 'Switch music folder', onchange: onSourcePick })),
@@ -1270,8 +1259,11 @@ async function popOut() {
   if (!deck || popWin) return;
   const rect = deck.getBoundingClientRect();
   const width = Math.round(Math.max(320, rect.width / (parseFloat(document.documentElement.style.getPropertyValue('--stage-zoom')) || 1)));
-  // Room for the deck plus a scrolling song list underneath.
-  const height = Math.round(Math.max(260, deck.scrollHeight) + 240);
+  // The pop-out opens as just the player; the song list starts folded (the SONGS button opens it).
+  const list = full.querySelector('.playlist');
+  list?.classList.add('folded');
+  const barH = list ? list.getBoundingClientRect().height : 0;
+  const height = Math.round(Math.max(260, deck.scrollHeight) + barH);
   let win;
   try {
     win = 'documentPictureInPicture' in window
@@ -1308,7 +1300,8 @@ async function popOut() {
   rootSync.observe(document.documentElement, { attributes: true });
   popDoc.body.className = 'popout';
   // The deck and playlist keep all their buttons and listeners when moved.
-  popDoc.body.append(deck, ...[full.querySelector('.playlist')].filter(Boolean));
+  popDoc.body.append(deck, ...[list].filter(Boolean));
+  if (list) syncSongButtons(list);
   setOtherDocument(popDoc);
   full.prepend(h('div', { class: 'popped-note' },
     h('p', {}, 'The player is in its own window.'),
@@ -1334,7 +1327,10 @@ function popIn() {
   rootSync?.disconnect();
   setOtherDocument(null);
   full.querySelector('.popped-note')?.remove();
-  if (list) full.prepend(list);
+  if (list) {
+    list.classList.remove('folded'); // in the page the song list is always shown
+    full.prepend(list);
+  }
   if (deck) full.prepend(deck);
   document.body.classList.remove('popped');
   try { win.close(); } catch { /* already closed */ }
@@ -1350,6 +1346,46 @@ function updatePopButton() {
   if (!btn) return;
   btn.innerHTML = popWin ? icons.popin : icons.popout;
   btn.title = popWin ? 'Put the player back in the page' : 'Pop out: float the player above other windows';
+}
+
+/**
+ * Folds or unfolds the song list. In the pop-out window the window itself shrinks or grows to
+ * match (browsers allow that from a click), so the player stays compact.
+ */
+function toggleSongs(open) {
+  const pl = $('.playlist');
+  if (!pl) return;
+  const wasFolded = pl.classList.contains('folded');
+  const show = open ?? wasFolded;
+  const before = pl.getBoundingClientRect().height;
+  pl.classList.toggle('folded', !show);
+  syncSongButtons(pl);
+  const win = pl.ownerDocument.defaultView;
+  if (win !== window && show === wasFolded) {
+    if (!show) pl.dataset.openHeight = String(Math.round(before));
+    const after = pl.getBoundingClientRect().height;
+    const delta = show ? Number(pl.dataset.openHeight || 260) - after : after - before;
+    try { win.resizeBy(0, Math.round(delta)); } catch { /* the browser decides */ }
+  }
+  if (show) {
+    shownTrackId = null; // scroll the playing song into view
+    renderPlaylist();
+  }
+}
+
+function syncSongButtons(pl) {
+  const show = !pl.classList.contains('folded');
+  const songs = $('#btn-songs');
+  songs?.setAttribute('aria-expanded', String(show));
+  songs?.classList.toggle('on', show);
+  if (songs) songs.title = show ? 'Hide the song list' : 'Show the song list';
+  const fold = pl.querySelector('.pl-fold');
+  if (fold) {
+    fold.setAttribute('aria-expanded', String(show));
+    fold.setAttribute('aria-label', show ? 'Hide the song list' : 'Show the song list');
+    fold.title = fold.getAttribute('aria-label');
+    fold.querySelector('.fold-txt').textContent = show ? 'HIDE' : 'SHOW';
+  }
 }
 
 /** The visualizer must run on the animation clock of whichever window the deck is in. */

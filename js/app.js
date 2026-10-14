@@ -1267,7 +1267,8 @@ async function popOut() {
   let win;
   try {
     win = 'documentPictureInPicture' in window
-      ? await window.documentPictureInPicture.requestWindow({ width, height })
+      // preferInitialWindowPlacement: use this size, not the size Chrome remembers from last time.
+      ? await window.documentPictureInPicture.requestWindow({ width, height, preferInitialWindowPlacement: true })
       : window.open('', 'music-box-player', `popup,width=${width},height=${height}`);
   } catch (err) {
     toast(`Couldn't pop out the player: ${err.message}`);
@@ -1302,6 +1303,7 @@ async function popOut() {
   // The deck and playlist keep all their buttons and listeners when moved.
   popDoc.body.append(deck, ...[list].filter(Boolean));
   if (list) syncSongButtons(list);
+  fitPopToContent();
   setOtherDocument(popDoc);
   full.prepend(h('div', { class: 'popped-note' },
     h('p', {}, 'The player is in its own window.'),
@@ -1371,6 +1373,22 @@ function toggleSongs(open) {
     shownTrackId = null; // scroll the playing song into view
     renderPlaylist();
   }
+}
+
+/** Sizes the pop-out window to exactly the player (plus the song list when it's open). */
+function fitPopToContent() {
+  if (!popWin) return;
+  const deck = popDoc.querySelector('.deck');
+  const list = popDoc.querySelector('.playlist');
+  if (!deck) return;
+  popWin.requestAnimationFrame(() => {
+    const listH = list ? (list.classList.contains('folded') ? list.getBoundingClientRect().height : Math.max(240, list.getBoundingClientRect().height)) : 0;
+    const needed = Math.ceil(deck.getBoundingClientRect().height + listH);
+    const diff = needed - popWin.innerHeight;
+    if (Math.abs(diff) > 2) {
+      try { popWin.resizeBy(0, diff); } catch { /* the browser decides */ }
+    }
+  });
 }
 
 function syncSongButtons(pl) {

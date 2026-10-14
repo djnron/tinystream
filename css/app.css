@@ -1111,6 +1111,10 @@ body.popout #btn-popout { display: grid; }
 body.popout { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
 body.popout .window { width: 100%; max-width: none; margin: 0; border-radius: 0; box-shadow: none; }
 body.popout .deck { flex: none; }
+/* If the window ends up taller than the folded player (some browsers ignore the size we ask for),
+   the deck stretches to fill it rather than leaving an empty sheet underneath. */
+body.popout:has(.playlist.folded) .deck { flex: 1; display: flex; flex-direction: column; }
+body.popout:has(.playlist.folded) .deck-body { flex: 1; align-content: center; }
 body.popout .playlist { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 body.popout .playlist .pl { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
 

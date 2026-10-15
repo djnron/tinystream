@@ -72,6 +72,8 @@ function setTitle(text) {
 
 function show(...nodes) {
   view.replaceChildren(...nodes.filter((n) => n instanceof Node));
+  // The page scrolls on its own, except in stage mode where the library drawer scrolls instead.
+  window.scrollTo(0, 0);
   view.scrollTop = 0;
 }
 
@@ -907,7 +909,9 @@ async function resetApp() {
 
 const mini = $('#mini');
 const full = $('#full');
-const wide = matchMedia('(min-width: 900px)');
+// Keep in step with the min-width breakpoints in css/app.css.
+const WIDE = '(min-width: 768px)';
+const wide = matchMedia(WIDE);
 let stopViz = null;
 let shownQueue = null;
 let shownTrackId = null;
@@ -1189,13 +1193,12 @@ function closeFull() {
 // Pop-out: the deck moves into its own small window. In Chrome and Edge that window stays on top of
 // everything (Document Picture-in-Picture); elsewhere it's an ordinary pop-up window.
 
-const stageQuery = matchMedia('(min-width: 900px)');
-const isStage = () => Boolean(store.settings.stage) && stageQuery.matches && !popWin;
+const isStage = () => Boolean(store.settings.stage) && wide.matches && !popWin;
 
 function setStage(on) {
   store.setSetting('stage', on);
   applyStage();
-  toast(on ? 'Stage mode: the library is in the drawer (☰ Library, or press L)' : 'Stage mode off', { timeout: 2500 });
+  toast(on ? 'Stage mode: open your music with the Library button (or press L)' : 'Stage mode off', { timeout: 2500 });
 }
 
 function applyStage() {
@@ -1217,6 +1220,7 @@ function fitStage() {
   const list = full.querySelector('.playlist');
   const root = document.documentElement;
   if (!isStage() || !deck) {
+    document.body.classList.remove('stage-stacked');
     root.style.removeProperty('--stage-zoom');
     if (list) list.style.removeProperty('height');
     requestAnimationFrame(repaintSkinArt);
@@ -1230,7 +1234,12 @@ function fitStage() {
   root.style.setProperty('--topbar-h', `${Math.round(top)}px`);
   const availW = innerWidth - 96;
   const availH = innerHeight - top - 64;
-  const zoom = Math.max(1, Math.min(2.6, availW / (natural.width * 2 + 24), availH / natural.height));
+  // Side by side, or stacked when the screen is taller than wide (tablets held upright), whichever
+  // lets them grow bigger. It shrinks below 1 too, so a wide skin still fits a smaller window.
+  const across = Math.min(availW / (natural.width * 2 + 24), availH / natural.height);
+  const stacked = Math.min(availW / natural.width, availH / (natural.height * 2 + 24));
+  document.body.classList.toggle('stage-stacked', stacked > across);
+  const zoom = Math.max(0.6, Math.min(2.6, Math.max(across, stacked)));
   root.style.setProperty('--stage-zoom', zoom.toFixed(3));
   requestAnimationFrame(repaintSkinArt);
 }
@@ -1431,7 +1440,7 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
-stageQuery.addEventListener('change', applyStage);
+wide.addEventListener('change', applyStage);
 window.addEventListener('resize', debounce(fitStage, 150));
 window.addEventListener('skinchange', () => setTimeout(fitStage, 50));
 window.addEventListener('hashchange', () => { if (isStage()) toggleDrawer(true); });
@@ -1467,10 +1476,12 @@ document.addEventListener('click', () => {
 
 document.addEventListener('keydown', onKey);
 function onKey(e) {
-  if (e.target.closest?.('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest?.('input, select, textarea, [contenteditable]') || e.metaKey || e.ctrlKey || e.altKey) return;
+  // Space and Enter press whatever button or link has focus; only take them over otherwise.
+  const onControl = e.target.closest?.('button, a[href], summary, [role=button], [role=switch]');
   if (e.key === 'f' || e.key === 'F') { e.preventDefault(); setStage(!store.settings.stage); return; }
   if ((e.key === 'l' || e.key === 'L') && isStage()) { e.preventDefault(); toggleDrawer(); return; }
-  if (e.code === 'Space' && player.current) { e.preventDefault(); player.toggle(); }
+  if (e.code === 'Space' && player.current && !onControl) { e.preventDefault(); player.toggle(); }
   if (e.key === 'Escape') { closeFull(); toggleDrawer(false); }
   // Classic keyboard layout: z x c v b = previous, play, pause, stop, next.
   const keys = {

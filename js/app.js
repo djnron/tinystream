@@ -1271,14 +1271,13 @@ async function popOut() {
   // The pop-out opens as just the player (song list folded) unless the list was open last time.
   const list = full.querySelector('.playlist');
   list?.classList.toggle('folded', !store.settings.popSongs);
-  const barH = list ? list.getBoundingClientRect().height : 0;
-  const height = Math.round(Math.max(260, deck.scrollHeight) + barH);
+  const height = Math.round(popExtra() + popHeightFor(deck, list));
   let win;
   try {
     win = 'documentPictureInPicture' in window
-      // Chrome reopens the window at the size it had when last closed (only the first time is this
-      // size used). Opening with the song list in the same state it was left in keeps the two matched.
-      ? await window.documentPictureInPicture.requestWindow({ width, height })
+      // Without preferInitialWindowPlacement Chrome reopens the window at whatever size it was last
+      // closed at, which can disagree with the song list's saved state.
+      ? await window.documentPictureInPicture.requestWindow({ width, height, preferInitialWindowPlacement: true })
       : window.open('', 'music-box-player', `popup,width=${width},height=${height}`);
   } catch (err) {
     toast(`Couldn't pop out the player: ${err.message}`);
@@ -1313,10 +1312,21 @@ async function popOut() {
   // The deck and playlist keep all their buttons and listeners when moved.
   popDoc.body.append(deck, ...[list].filter(Boolean));
   if (list) syncSongButtons(list);
-  // If the window still opens taller than the folded player, the first click in it (which is what
-  // lets a page resize its window) quietly shrinks it to fit. Chrome then remembers that size.
-  popDoc.addEventListener('pointerdown', () => { if (popSpare() > 24) fitPopToContent(); }, { capture: true });
-  fitPopToContent();
+  // Chrome's frame takes some of the requested height (its title bar); measure how much once the
+  // window settles, so later opens ask for exactly enough. Only a plausible amount is kept, since a
+  // browser that ignores the requested size gives a meaningless difference.
+  const settle = () => {
+    if (popWin !== win) return;
+    const loss = height - win.innerHeight;
+    if (loss >= 0 && loss <= 150) store.setSetting('popExtra', loss);
+  };
+  win.addEventListener('resize', settle);
+  setTimeout(() => { settle(); win.removeEventListener('resize', settle); }, 1000);
+  // Until then (or in a browser that ignores the requested size) the first click in the window, which
+  // is what lets a page resize its window, fits it. The song buttons do their own fitting.
+  popDoc.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest?.('#btn-songs, .pl-fold')) fitPop();
+  }, { capture: true });
   setOtherDocument(popDoc);
   full.prepend(h('div', { class: 'popped-note' },
     h('p', {}, 'The player is in its own window.'),
@@ -1370,18 +1380,18 @@ function updatePopButton() {
 function toggleSongs(open) {
   const pl = $('.playlist');
   if (!pl) return;
-  const wasFolded = pl.classList.contains('folded');
-  const show = open ?? wasFolded;
-  const before = pl.getBoundingClientRect().height;
+  const show = open ?? pl.classList.contains('folded');
+  const win = pl.ownerDocument.defaultView;
+  if (win !== window && !show && !pl.classList.contains('folded')) {
+    // Reopen the list at the height it had, including any resizing done by hand.
+    const listH = Math.round(pl.getBoundingClientRect().height);
+    if (listH >= POP_LIST_MIN) store.setSetting('popListH', listH);
+  }
   pl.classList.toggle('folded', !show);
   syncSongButtons(pl);
-  const win = pl.ownerDocument.defaultView;
-  if (win !== window) store.setSetting('popSongs', show); // reopen the pop-out the same way next time
-  if (win !== window && show === wasFolded) {
-    if (!show) pl.dataset.openHeight = String(Math.round(before));
-    const after = pl.getBoundingClientRect().height;
-    const delta = show ? Number(pl.dataset.openHeight || 260) - after : after - before;
-    try { win.resizeBy(0, Math.round(delta)); } catch { /* the browser decides */ }
+  if (win !== window) {
+    store.setSetting('popSongs', show); // reopen the pop-out the same way next time
+    fitPop();
   }
   if (show) {
     shownTrackId = null; // scroll the playing song into view
@@ -1389,28 +1399,42 @@ function toggleSongs(open) {
   }
 }
 
-/** How much taller the pop-out window is than the folded player (0 when it fits or the list is open). */
-function popSpare() {
-  if (!popWin) return 0;
-  const deck = popDoc.querySelector('.deck');
-  const list = popDoc.querySelector('.playlist');
-  if (!deck || !list?.classList.contains('folded')) return 0;
-  const used = deck.getBoundingClientRect().height + list.getBoundingClientRect().height;
-  return Math.max(0, Math.floor(popWin.innerHeight - used));
+const POP_LIST_MIN = 120;
+
+/**
+ * How much more height to ask for than the content needs: Chrome counts its picture-in-picture title
+ * bar in the requested height. Measured on each open; 56 is what Chrome on macOS takes.
+ */
+const popExtra = () => store.settings.popExtra ?? ('documentPictureInPicture' in window ? 56 : 0);
+
+/** The pop-out content height that fits the deck plus the song list in its current folded/open state. */
+function popHeightFor(deck, list) {
+  const deckH = deck.scrollHeight;
+  if (!list) return deckH;
+  if (!list.classList.contains('folded')) return deckH + (store.settings.popListH || 260);
+  // Folded, the list is its title bar plus its own padding (measured directly: in the page it stretches).
+  const bar = list.querySelector('.titlebar');
+  const cs = getComputedStyle(list);
+  return deckH + (bar ? bar.getBoundingClientRect().height : 0) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+    + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
 }
 
 /**
- * Sizes the pop-out window to the folded player. Browsers only allow resizing from a click inside
- * the window, so this is tried on open (may be refused) and again on the first click in it.
+ * Sizes the pop-out window to fit the player: exactly, with the list folded; with it open, only when
+ * the list would be squeezed below a usable height (otherwise a size set by hand is kept).
+ * Browsers only allow this from a click inside the window, so it is called from clicks.
  */
-function fitPopToContent() {
+function fitPop() {
   if (!popWin) return;
-  popWin.requestAnimationFrame(() => {
-    const spare = popSpare();
-    if (spare > 2) {
-      try { popWin.resizeBy(0, -spare); } catch { /* not allowed without a click; tried again on the first one */ }
-    }
-  });
+  const deck = popDoc.querySelector('.deck');
+  const list = popDoc.querySelector('.playlist');
+  if (!deck) return;
+  const open = list && !list.classList.contains('folded');
+  if (open && list.getBoundingClientRect().height >= POP_LIST_MIN) return;
+  const delta = Math.round(popHeightFor(deck, list) - popWin.innerHeight);
+  if (Math.abs(delta) > 2) {
+    try { popWin.resizeBy(0, delta); } catch { /* needs a click in the window; tried again on the next one */ }
+  }
 }
 
 function syncSongButtons(pl) {

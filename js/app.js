@@ -66,7 +66,7 @@ async function render() {
 
 function setTitle(text) {
   // The logo already says Music Box, so the home screen's title shows the sections instead.
-  $('#title').textContent = text === 'Music Box' ? 'Home' : text;
+  $('#title').textContent = text === 'Music Box' ? 'Library' : text;
   document.title = text === 'Music Box' ? text : `${text} · Music Box`;
 }
 
@@ -167,43 +167,53 @@ function reconnectButton(p, after = render, label = `Reconnect ${p.label}`) {
 function homeView() {
   setTitle('Music Box');
   rows.clear();
-  const cards = Object.values(providers).map((p) => {
+  const sources = Object.values(providers).map((p) => {
     const configured = p.isConfigured();
     const connected = configured && p.isConnected();
     const isLocal = p.id === 'local';
     let status;
-    let actions;
+    let primary = null;
+    let extra = [];
     if (!configured) {
       status = 'Not set up — add your key in config.js (see README).';
     } else if (connected) {
-      status = isLocal ? `Playing from “${p.rootName}” · files stay on this device` : 'Connected · read-only access';
-      actions = [
-        h('a', { class: 'btn primary', href: hashFor.folder(p.id, p.rootId, p.rootName) }, 'Browse'),
-        isLocal && h('button', { class: 'btn', onclick: () => connect(p) }, 'Change folder'),
-        h('button', { class: 'btn', onclick: () => disconnect(p) }, isLocal ? 'Forget' : 'Disconnect'),
+      status = isLocal ? `“${p.rootName}” · files stay on this device` : 'Connected · read-only access';
+      primary = h('a', { class: 'btn primary', href: hashFor.folder(p.id, p.rootId, p.rootName) }, 'Browse');
+      extra = [
+        isLocal && h('button', { class: 'link', onclick: () => connect(p) }, 'Change folder'),
+        h('button', { class: 'link', onclick: () => disconnect(p) }, isLocal ? 'Forget' : 'Disconnect'),
       ];
     } else {
-      status = isLocal ? 'Play music from a folder on this computer or phone. No account needed.' : 'Not connected';
-      actions = [h('button', { class: 'btn primary', onclick: () => connect(p) },
-        isLocal ? 'Choose a music folder' : `Connect ${p.label}`)];
+      status = isLocal ? 'Any folder on this device. No account needed.' : 'Not connected';
+      primary = h('button', { class: 'btn', onclick: () => connect(p) }, isLocal ? 'Choose folder' : 'Connect');
     }
-    return h('section', { class: `card source ${configured ? '' : 'disabled'}` },
-      h('div', { class: 'card-head' }, iconSpan(isLocal ? 'folder' : 'cloud', `ico badge ${p.id}`),
-        h('div', {}, h('h2', {}, p.label), h('p', { class: 'muted' }, status))),
-      actions && h('div', { class: 'actions' }, actions));
+    return sourceRow(isLocal ? 'folder' : 'cloud', p.id, p.label, status, primary, extra, !configured);
   });
 
-  const device = store.settings.allowDownloads || store.savedIds.size
-    ? h('a', { class: 'card source link-card', href: hashFor.saved() },
-      h('div', { class: 'card-head' }, iconSpan('phone', 'ico badge device'),
-        h('div', {}, h('h2', {}, 'Saved for offline'),
-          h('p', { class: 'muted' }, `${store.savedIds.size} saved track${store.savedIds.size === 1 ? '' : 's'} · plays offline`))))
-    : h('section', { class: 'card hint' },
-      h('p', {}, h('strong', {}, 'Downloads are off. '),
-        'Cloud music streams and nothing is stored on this device. ',
-        h('a', { href: hashFor.settings() }, 'Change in Settings')));
+  const saved = store.settings.allowDownloads || store.savedIds.size
+    ? sourceRow('phone', 'device', 'Saved for offline',
+      `${store.savedIds.size} track${store.savedIds.size === 1 ? '' : 's'} · plays without a connection`,
+      h('a', { class: 'btn', href: hashFor.saved() }, 'Open'))
+    : sourceRow('phone', 'device', 'Downloads are off',
+      'Cloud music streams and nothing is stored on this device.',
+      h('a', { class: 'btn', href: hashFor.settings() }, 'Settings'));
 
-  show(h('div', { class: 'stack' }, pinsCard(), ...cards, device));
+  show(h('div', { class: 'stack home' },
+    h('section', {}, sectionTitle('My folders'), pinTiles()),
+    h('section', {}, sectionTitle('Sources'), h('div', { class: 'card source-list' }, ...sources, saved))));
+}
+
+/** A heading styled like a little window title bar, so the library wears the current skin too. */
+const sectionTitle = (text) => h('h2', { class: 'section-title' }, h('span', {}, text));
+
+function sourceRow(icon, id, label, status, primary, extra = [], disabled = false) {
+  return h('div', { class: `source-row${disabled ? ' disabled' : ''}` },
+    iconSpan(icon, `ico badge ${id}`),
+    h('div', { class: 'source-text' },
+      h('h3', {}, label),
+      h('p', { class: 'muted' }, status),
+      extra.some(Boolean) && h('div', { class: 'source-extra' }, extra)),
+    primary);
 }
 
 // ---------------------------------------------------------------- pinned folders ("My folders")
@@ -223,24 +233,29 @@ function togglePin(pid, id, name) {
   updatePlayerUi();
 }
 
-function pinsCard() {
+/** Pinned folders as record-sleeve tiles: tap to play, with open and unpin beside the name. */
+function pinTiles() {
   const list = pins();
-  return h('section', { class: 'card pins' },
-    h('h2', {}, 'My folders'),
-    list.length
-      ? h('ul', { class: 'list pin-list' }, list.map((f) => {
-        const p = getProvider(f.pid);
-        return h('li', { class: 'row' },
-          h('button', { class: 'row-main', onclick: () => playFolder(f), title: `Play everything in ${f.name}` },
-            iconSpan('play', 'ico folder'),
-            h('span', { class: 'row-text' },
-              h('span', { class: 'row-title' }, f.name),
-              h('span', { class: 'row-sub' }, p?.label || f.pid))),
-          h('a', { class: 'icon-btn', href: hashFor.folder(f.pid, f.id, f.name), title: 'Open folder', html: icons.folder }),
-          h('button', { class: 'icon-btn', title: 'Unpin', 'aria-label': `Unpin ${f.name}`, html: icons.close,
-            onclick: () => { togglePin(f.pid, f.id, f.name); render(); } }));
-      }))
-      : h('p', { class: 'muted' }, 'Pin folders while browsing (☆ Pin) to switch your music here in one tap.'));
+  if (!list.length) {
+    const first = Object.values(providers).find((p) => p.isConfigured() && p.isConnected());
+    return h('div', { class: 'tiles' },
+      h('div', { class: 'tile empty' },
+        h('p', {}, 'Pin folders while browsing (☆ Pin) and they show up here, one tap to play.'),
+        first && h('a', { class: 'btn', href: hashFor.folder(first.id, first.rootId, first.rootName) }, `Browse ${first.label}`)));
+  }
+  return h('ul', { class: 'tiles' }, list.map((f) => {
+    const p = getProvider(f.pid);
+    return h('li', { class: 'tile' },
+      h('button', { class: 'tile-play', onclick: () => playFolder(f), title: `Play everything in ${f.name}`, 'aria-label': `Play ${f.name}` },
+        h('span', { class: 'tile-art' },
+          h('span', { class: 'tile-lcd' }, f.name),
+          iconSpan('play', 'tile-go'))),
+      h('div', { class: 'tile-foot' },
+        h('span', { class: 'tile-sub' }, p?.label || f.pid),
+        h('a', { class: 'icon-btn', href: hashFor.folder(f.pid, f.id, f.name), title: 'Open folder', 'aria-label': `Open ${f.name}`, html: icons.folder }),
+        h('button', { class: 'icon-btn', title: 'Unpin', 'aria-label': `Unpin ${f.name}`, html: icons.close,
+          onclick: () => { togglePin(f.pid, f.id, f.name); render(); } })));
+  }));
 }
 
 /** Plays a whole folder, subfolders included, and remembers it as the current source. */
@@ -274,7 +289,7 @@ let currentSource = null;
 async function browseView(pid, folderId, name, stale) {
   const p = getProvider(pid);
   rows.clear();
-  if (!p) return show(message('Unknown source', null, h('a', { class: 'btn', href: '#/' }, 'Home')));
+  if (!p) return show(message('Unknown source', null, h('a', { class: 'btn', href: '#/' }, 'Library')));
   folderId ||= p.rootId;
   name ||= p.rootName;
   setTitle(name);
@@ -372,7 +387,7 @@ async function browseView(pid, folderId, name, stale) {
 }
 
 async function savedView(stale) {
-  setTitle('On this device');
+  setTitle('Saved for offline');
   rows.clear();
   const [list, info] = await Promise.all([store.listSaved().catch(() => []), store.storageInfo()]);
   if (stale()) return;

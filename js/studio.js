@@ -395,7 +395,7 @@ function picturesSection(deep) {
   return section('Pictures', null,
     list.length ? h('div', { class: 'pic-cards' }, list.map((p, i) => pictureCard(p, i, deep))) : null,
     addZone,
-    h('p', { class: 'setting-desc' }, 'Pictures stay on this device. They aren’t included when you share a record.'));
+    h('p', { class: 'setting-desc' }, 'Pictures are kept on this device. When you share a record, you can include them.'));
 }
 
 function pictureAdder() {

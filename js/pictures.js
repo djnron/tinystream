@@ -55,29 +55,69 @@ export function validatePictures(list) {
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
+const withTimeout = (promise, ms, message) => Promise.race([
+  promise,
+  new Promise((_, reject) => { setTimeout(() => reject(new Error(message)), ms); }),
+]);
+
+/** Decodes a picture with whatever the browser supports (older Safari lacks some of these). */
+async function decode(blob) {
+  if ('createImageBitmap' in window) {
+    try { return await createImageBitmap(blob); } catch { /* try the old way */ }
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+/** Encodes a canvas, preferring WebP; Safari can't write WebP, so it gets JPEG (or PNG for cut-outs). */
+async function encode(canvas, transparent) {
+  const toBlob = (type, q) => (canvas.convertToBlob
+    ? canvas.convertToBlob({ type, quality: q })
+    : new Promise((resolve) => canvas.toBlob(resolve, type, q)));
+  const webp = await toBlob('image/webp', 0.88);
+  if (webp?.type === 'image/webp') return webp;
+  return toBlob(transparent ? 'image/png' : 'image/jpeg', 0.86);
+}
+
 /** Shrinks an image to at most `max` px on its longest side and re-encodes it (keeps transparency). */
 async function shrink(blob, max = 1600) {
-  const bmp = await createImageBitmap(blob);
-  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const canvas = new OffscreenCanvas(Math.round(bmp.width * k), Math.round(bmp.height * k));
-  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  bmp.close?.();
-  return canvas.convertToBlob({ type: 'image/webp', quality: 0.88 });
+  const img = await decode(blob);
+  const w0 = img.width || img.naturalWidth;
+  const h0 = img.height || img.naturalHeight;
+  const k = Math.min(1, max / Math.max(w0, h0));
+  const w = Math.max(1, Math.round(w0 * k));
+  const h = Math.max(1, Math.round(h0 * k));
+  const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  img.close?.();
+  const transparent = /png|gif|webp/.test(blob.type) || /\.(png|gif|webp)$/i.test(blob.name || '');
+  const out = await encode(canvas, transparent);
+  if (!out) throw new Error('encode failed');
+  return out;
 }
+
+const looksLikeImage = (file) => file.type.startsWith('image/') || (!file.type && /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(file.name || ''));
 
 /** Stores an uploaded file and returns a new picture layer. */
 export async function addFile(file, defaults = {}) {
-  if (!file.type.startsWith('image/')) throw new Error('That file is not a picture');
+  if (!looksLikeImage(file)) throw new Error('That file is not a picture');
   if (file.size > 25e6) throw new Error('That picture is too big (25 MB at most)');
   let blob;
   try {
-    blob = file.type === 'image/gif' ? file : await shrink(file); // keep GIFs animated
+    blob = file.type === 'image/gif' ? file : await withTimeout(shrink(file), 20000, 'timeout'); // keep GIFs animated
   } catch {
-    throw new Error("Couldn't read that picture");
+    throw new Error("Couldn't read that picture. Try a JPEG or PNG.");
   }
   if (blob.size > 6e6) throw new Error('That animated picture is too big (6 MB at most)');
   const id = newId();
-  await putPicture(id, blob);
+  await withTimeout(putPicture(id, blob), 15000, 'Couldn’t save the picture on this device. Close other Music Box tabs or windows, reload, and try again.');
   return validatePicture({ ...defaults, src: `pic:${id}` });
 }
 
@@ -86,22 +126,22 @@ export async function addLink(url, defaults = {}) {
   const link = String(url).trim();
   if (!LINK.test(link)) throw new Error('Paste a link that starts with https://');
   try {
-    const res = await fetch(link, { mode: 'cors' });
+    const res = await withTimeout(fetch(link, { mode: 'cors' }), 12000, 'timeout');
     if (!res.ok) throw new Error(String(res.status));
     const type = res.headers.get('content-type') || '';
     if (!type.startsWith('image/')) throw new Error('not an image');
     const blob = await res.blob();
     const id = newId();
-    await putPicture(id, type === 'image/gif' ? blob : await shrink(blob));
+    await withTimeout(putPicture(id, type === 'image/gif' ? blob : await shrink(blob)), 15000, 'timeout');
     return { picture: validatePicture({ ...defaults, src: `pic:${id}`, link }), copied: true };
   } catch {
     // The site doesn't allow copying: show it straight from the link (it must load as an image).
-    await new Promise((resolve, reject) => {
+    await withTimeout(new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = resolve;
-      img.onerror = () => reject(new Error("Couldn't load a picture from that link"));
+      img.onerror = () => reject(new Error("Couldn't load a picture from that link. Use a link straight to the image (it usually ends in .jpg or .png)."));
       img.src = link;
-    });
+    }), 15000, "That link took too long to load. Use a link straight to the image (it usually ends in .jpg or .png).");
     return { picture: validatePicture({ ...defaults, src: link }), copied: false };
   }
 }
@@ -161,12 +201,12 @@ async function pixelUrl(src, size) {
   const url = await pictureUrl(src);
   if (!url || !/^(pic|rec):/.test(src)) return url;
   try {
-    const bmp = await createImageBitmap(await (await fetch(url)).blob());
-    const w = Math.max(8, Math.round(bmp.width / size));
-    const h = Math.max(8, Math.round(bmp.height / size));
-    const canvas = new OffscreenCanvas(w, h);
-    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
-    const out = URL.createObjectURL(await canvas.convertToBlob({ type: 'image/png' }));
+    const img = await decode(await (await fetch(url)).blob());
+    const w = Math.max(8, Math.round((img.width || img.naturalWidth) / size));
+    const h = Math.max(8, Math.round((img.height || img.naturalHeight) / size));
+    const canvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const out = URL.createObjectURL(await new Promise((resolve) => canvas.toBlob(resolve, 'image/png')));
     pixelUrls.set(key, out);
     return out;
   } catch {

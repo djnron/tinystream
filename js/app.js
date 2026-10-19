@@ -1651,6 +1651,10 @@ async function start() {
   applySkin(currentSkin());
   requestAnimationFrame(() => paintSkinArt(currentSkin()));
   await store.init();
+  if (store.isBlocked()) {
+    toast('Music Box is open in another tab or window. Close the others so this one can save pictures and music.', { timeout: 9000 });
+    store.events.addEventListener('db-ready', () => toast('All set: this tab can save again'), { once: true });
+  }
   await providers.local.init().catch(() => {});
   try {
     const { dropbox } = providers;

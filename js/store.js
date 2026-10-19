@@ -46,7 +46,11 @@ const DB_NAME = 'music-box';
 const DB_VERSION = 3;
 let dbPromise;
 
+let blocked = null; // the error while an older copy of the app holds the database open
+export const isBlocked = () => Boolean(blocked);
+
 function openDb() {
+  if (blocked) return Promise.reject(blocked);
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
@@ -58,8 +62,26 @@ function openDb() {
       add('handles'); // the local music folder the user picked (a pointer, not music)
       add('pictures'); // pictures the user added to their own skins (Skin Studio)
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // A newer version of the app opened in another tab or window: step aside so it can upgrade.
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      if (blocked) {
+        // The other copy closed and the upgrade went through: use the database from now on.
+        blocked = null;
+        dbPromise = Promise.resolve(db);
+        emit('db-ready', {});
+      }
+      resolve(db);
+    };
     req.onerror = () => { dbPromise = null; reject(req.error); };
+    // An older copy of the app (another tab, or the home-screen app) is holding the database open,
+    // so it can't be upgraded until that copy closes. Say so instead of waiting forever. The request
+    // stays queued and finishes by itself once the other copy closes (see onsuccess).
+    req.onblocked = () => {
+      blocked = new Error('Music Box is open in another tab or window (or the home-screen app). Close the others, then try again.');
+      reject(blocked);
+    };
   });
   return dbPromise;
 }
@@ -156,19 +178,33 @@ export async function deleteHandle(key) {
 }
 
 /** Pictures for the user's own skins. Small, theirs, and not music, so kept even when downloads are off. */
+// Stored as plain bytes plus a type: some Safari versions can't keep Blobs in IndexedDB.
+const memoryPictures = new Map(); // fallback when IndexedDB isn't available (some private modes)
+
 export async function putPicture(id, blob) {
-  await run('pictures', 'readwrite', (t) => t.objectStore('pictures').put(blob, id));
+  const record = { type: blob.type, data: await blob.arrayBuffer() };
+  try {
+    await run('pictures', 'readwrite', (t) => t.objectStore('pictures').put(record, id));
+  } catch (err) {
+    if (err === blocked || /open in another tab/.test(err.message)) throw err;
+    memoryPictures.set(id, blob);
+    emit('picture-memory', { id });
+  }
 }
 
 export async function getPicture(id) {
+  if (memoryPictures.has(id)) return memoryPictures.get(id);
   try {
-    return await run('pictures', 'readonly', (t) => t.objectStore('pictures').get(id));
+    const v = await run('pictures', 'readonly', (t) => t.objectStore('pictures').get(id));
+    if (!v) return null;
+    return v instanceof Blob ? v : new Blob([v.data], { type: v.type || 'image/png' });
   } catch {
     return null;
   }
 }
 
 export async function deletePicture(id) {
+  memoryPictures.delete(id);
   await run('pictures', 'readwrite', (t) => t.objectStore('pictures').delete(id));
 }
 

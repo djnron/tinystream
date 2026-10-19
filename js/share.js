@@ -9,8 +9,9 @@
 // protection: a browser that can play a song has its data, so a determined person could still save it.
 
 import { CONFIG } from '../config.js';
+import { pictureBlob, setRemoteLoader, validatePicture } from './pictures.js';
 import { getProvider } from './providers/index.js';
-import { validateArt, validateLayout, validateTokens } from './skins.js';
+import { validateArt, validateFonts, validateLayout, validateTokens } from './skins.js';
 import { stripExt, withAudioType } from './util.js';
 
 const RECORDS_KEY = 'mb.records';
@@ -63,9 +64,11 @@ function dropboxPath(url) {
  * Shares the tracks and returns { url, record }. `onProgress(done, total)` reports sharing progress.
  * Throws { code: 'dropbox-scope' } when Dropbox needs the extra sharing permission first.
  */
-export async function createRecord({ title, tracks, skin, noDownload, onProgress }) {
+export async function createRecord({ title, tracks, skin, noDownload, withPictures = true, source = null, onProgress }) {
   const list = tracks.slice(0, MAX_TRACKS);
   const items = [];
+  // Pictures first: if Dropbox needs a permission for them, nothing has been shared yet.
+  const pics = withPictures && skin?.pictures?.length ? await sharePictures(skin, list[0]?.provider) : { rows: [], items: [] };
   for (const [i, t] of list.entries()) {
     const p = getProvider(t.provider);
     if (t.provider === 'gdrive') {
@@ -83,7 +86,11 @@ export async function createRecord({ title, tracks, skin, noDownload, onProgress
     v: 1,
     t: title.slice(0, 80),
     d: noDownload ? 1 : 0,
-    s: skin ? { n: skin.name, k: skin.tokens, l: skin.layout, a: skin.art } : null,
+    s: skin ? {
+      n: skin.name, k: skin.tokens, l: skin.layout, a: skin.art,
+      f: skin.fonts?.length ? skin.fonts : undefined,
+      p: pics.rows.length ? pics.rows : undefined,
+    } : null,
     r: items.map((x) => [x.src, x.ref, x.name, x.size || 0, x.key || 0]),
   });
   const url = recordUrl(payload);
@@ -92,13 +99,104 @@ export async function createRecord({ title, tracks, skin, noDownload, onProgress
     title,
     url,
     noDownload,
+    source: source || undefined, // the folder it was made from, so the player's Share can offer it again
     created: Date.now(),
     count: items.length,
-    items: items.map((x) => ({ src: x.src, ref: x.ref, url: x.url })),
+    items: [...items, ...pics.items].map((x) => ({ src: x.src, ref: x.ref, url: x.url })),
   };
   saveRecords([record, ...myRecords()]);
   return { url, record, truncated: tracks.length > list.length };
 }
+
+// ---------- pictures in records ----------
+//
+// A skin's own pictures are saved next to the songs (in the same Google Drive or Dropbox) and
+// shared by link, so listeners see them without an account. The record carries each picture's id
+// plus its settings (where it shows, fit, effect...). Pictures added from a web link travel as
+// that link, and listeners choose whether to load them (that site would see their visit).
+
+const UPLOADS_KEY = 'mb.pictureUploads'; // "<host>:<picture src>" -> what was uploaded, to reuse it
+const PIC_FIELDS = ['area', 'fit', 'effect', 'blend', 'opacity', 'scale', 'hue', 'contrast', 'saturate', 'blur', 'pixel', 'rotate', 'corner'];
+const picSettings = (p) => Object.fromEntries(PIC_FIELDS.map((k) => [k, p[k]]));
+
+function uploads() {
+  try { return JSON.parse(localStorage.getItem(UPLOADS_KEY)) || {}; } catch { return {}; }
+}
+
+/** Uploads and shares the skin's stored pictures; returns record rows and items to unshare later. */
+async function sharePictures(skin, songsProvider) {
+  const rows = [];
+  const items = [];
+  const drive = getProvider('gdrive');
+  const dropbox = getProvider('dropbox');
+  // Same place as the songs. Dropbox needs one more permission; use Drive instead if it's connected.
+  const host = songsProvider === 'gdrive' || !(dropbox?.isConnected())
+    ? 'gdrive'
+    : dropbox.canUploadPictures() || !drive?.isConnected() ? 'dropbox' : 'gdrive';
+  const done = uploads();
+  for (const p of skin.pictures) {
+    if (p.src.startsWith('pic:')) {
+      const key = `${host}:${p.src}`;
+      let up = done[key];
+      if (up) {
+        // Reuse the earlier upload; sharing it again covers "stopped sharing" since. If it was
+        // deleted in the meantime, upload it again.
+        try {
+          if (host === 'gdrive') await drive.shareFile(up.ref);
+          else up.url = await dropbox.shareFile(up.id);
+        } catch (err) {
+          if (err.code) throw err;
+          up = null;
+        }
+      }
+      if (!up) {
+        const blob = await pictureBlob(p.src);
+        if (!blob) continue;
+        const name = `${p.src.slice(4)}.${(blob.type.split('/')[1] || 'webp').replace(/[^a-z]/g, '')}`;
+        up = host === 'gdrive' ? await drive.uploadPicture(blob, name) : await dropbox.uploadPicture(blob, name);
+      }
+      done[key] = up;
+      localStorage.setItem(UPLOADS_KEY, JSON.stringify(done));
+      if (host === 'gdrive') {
+        rows.push(['g', up.ref, up.key || 0, picSettings(p)]);
+        items.push({ src: 'g', ref: up.ref });
+      } else {
+        const ref = dropboxPath(up.url);
+        rows.push(['d', ref, 0, picSettings(p)]);
+        items.push({ src: 'd', ref, url: up.url });
+      }
+    } else if (p.src.startsWith('https://')) {
+      rows.push(['l', p.src, 0, picSettings(p)]);
+    }
+  }
+  return { rows, items };
+}
+
+/** Fetches a record's picture ("rec:g:<id>[:<key>]" or "rec:d:<path>") without any account. */
+async function loadRecordPicture(src) {
+  const [, kind, ...rest] = src.split(':');
+  let res;
+  if (kind === 'g') {
+    const [id, key] = rest;
+    if (!DRIVE_ID.test(id)) return null;
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&key=${encodeURIComponent(CONFIG.googleApiKey)}`;
+    res = await fetch(url, { headers: key && /^[\w-]{1,100}$/.test(key) ? { 'X-Goog-Drive-Resource-Keys': `${id}/${key}` } : {} });
+  } else {
+    const path = rest.join(':');
+    if (!DROPBOX_PATH.test(path)) return null;
+    res = await fetch(`https://dl.dropboxusercontent.com${path}`);
+  }
+  if (!res.ok) return null;
+  const blob = await res.blob();
+  if (blob.size > 8e6) return null;
+  // Dropbox labels everything as a download; trust only real image types (or sniff via decoding).
+  if (blob.type.startsWith('image/')) return blob;
+  const typed = new Blob([blob], { type: 'image/webp' });
+  try { await createImageBitmap(typed); return typed; } catch { /* not WebP */ }
+  const png = new Blob([blob], { type: 'image/png' });
+  try { await createImageBitmap(png); return png; } catch { return null; }
+}
+setRemoteLoader(loadRecordPicture);
 
 /** Turns link sharing back off for the record's songs and forgets it. */
 export async function stopSharing(id) {
@@ -149,9 +247,26 @@ export async function openRecord(payload) {
         tokens: validateTokens(data.s.k || {}),
         layout: validateLayout(data.s.l || {}),
         art: validateArt(data.s.a),
+        fonts: validateFonts(data.s.f),
+        pictures: [],
       };
     } catch {
       skin = null; // a skin that doesn't pass the checks is simply ignored
+    }
+  }
+  // Pictures: ones saved next to the songs show straight away; web links wait until the listener agrees.
+  const linkPictures = [];
+  if (skin && Array.isArray(data.s?.p)) {
+    for (const row of data.s.p.slice(0, 4)) {
+      if (!Array.isArray(row)) continue;
+      const [kind, ref, key, settings] = row;
+      const src = kind === 'g' && DRIVE_ID.test(ref) ? `rec:g:${ref}${typeof key === 'string' && /^[\w-]{1,100}$/.test(key) ? `:${key}` : ''}`
+        : kind === 'd' && DROPBOX_PATH.test(ref) ? `rec:d:${ref}`
+          : kind === 'l' ? ref : null;
+      const pic = src && validatePicture({ ...(settings && typeof settings === 'object' ? settings : {}), src });
+      if (!pic) continue;
+      if (kind === 'l') linkPictures.push(pic);
+      else skin.pictures.push(pic);
     }
   }
   const tracks = [];
@@ -175,7 +290,7 @@ export async function openRecord(payload) {
       locked: noDownload,
     });
   }
-  return { title, noDownload, skin, tracks };
+  return { title, noDownload, skin, tracks, linkPictures };
 }
 
 /** A direct link to the file, offered only when the sender allowed downloads. */

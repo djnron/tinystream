@@ -43,7 +43,7 @@ export function setSetting(key, value) {
 // ---------- IndexedDB ----------
 
 const DB_NAME = 'music-box';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbPromise;
 
 function openDb() {
@@ -56,6 +56,7 @@ function openDb() {
       add('blobs'); // audio data, keyed by track id
       add('listings'); // folder listings, for browsing offline
       add('handles'); // the local music folder the user picked (a pointer, not music)
+      add('pictures'); // pictures the user added to their own skins (Skin Studio)
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => { dbPromise = null; reject(req.error); };
@@ -152,6 +153,23 @@ export async function getHandle(key) {
 
 export async function deleteHandle(key) {
   await run('handles', 'readwrite', (t) => t.objectStore('handles').delete(key));
+}
+
+/** Pictures for the user's own skins. Small, theirs, and not music, so kept even when downloads are off. */
+export async function putPicture(id, blob) {
+  await run('pictures', 'readwrite', (t) => t.objectStore('pictures').put(blob, id));
+}
+
+export async function getPicture(id) {
+  try {
+    return await run('pictures', 'readonly', (t) => t.objectStore('pictures').get(id));
+  } catch {
+    return null;
+  }
+}
+
+export async function deletePicture(id) {
+  await run('pictures', 'readwrite', (t) => t.objectStore('pictures').delete(id));
 }
 
 export async function storageInfo() {

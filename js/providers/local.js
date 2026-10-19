@@ -64,7 +64,7 @@ function pickWithInput() {
 
 export const local = {
   id: ID,
-  label: 'Folder on this device',
+  label: 'Local folder',
   rootId: 'root',
   get rootName() { return root?.name || memory?.name || 'My music'; },
 

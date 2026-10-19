@@ -4,6 +4,8 @@
 // values, and load the file back in.
 
 /** Every token a skin can set, with the "Deck 98" value as the fallback. */
+import { applyPictures, validatePictures } from './pictures.js';
+
 export const TOKENS = {
   // page + library
   bg: '#1b1c22',
@@ -177,6 +179,69 @@ export const SKINS = [
   }, { deck: 'hero', buttons: 'flat', titlebar: 'slim', lcd: 'sunken', seek: 'line', frame: 'soft', vis: 'mirror', list: 'compact', width: 340 }),
 ];
 
+// ---------- fonts ----------
+
+/**
+ * Fonts the Skin Studio offers. Ones marked `google` are loaded from Google Fonts when a skin uses
+ * them; the rest are fonts most computers already have.
+ */
+const mono = 'ui-monospace, monospace';
+const sans = 'Tahoma, Verdana, sans-serif';
+export const DISPLAY_FONTS = [
+  { name: 'Classic LCD', stack: '"Lucida Console", "Courier New", ui-monospace, monospace' },
+  { name: 'VT323', google: true, stack: `"VT323", ${mono}` },
+  { name: 'Share Tech Mono', google: true, stack: `"Share Tech Mono", ${mono}` },
+  { name: 'Press Start 2P', google: true, stack: `"Press Start 2P", ${mono}` },
+  { name: 'Silkscreen', google: true, stack: `"Silkscreen", ${mono}` },
+  { name: 'Orbitron', google: true, stack: `"Orbitron", ${sans}` },
+  { name: 'Major Mono Display', google: true, stack: `"Major Mono Display", ${mono}` },
+  { name: 'Space Mono', google: true, stack: `"Space Mono", ${mono}` },
+  { name: 'IBM Plex Mono', google: true, stack: `"IBM Plex Mono", ${mono}` },
+  { name: 'Monoton', google: true, stack: `"Monoton", ${sans}` },
+  { name: 'Courier', stack: '"Courier New", ui-monospace, monospace' },
+];
+export const LABEL_FONTS = [
+  { name: 'Tahoma', stack: 'Tahoma, Verdana, "Segoe UI", sans-serif' },
+  { name: 'Inter', google: true, stack: `"Inter", system-ui, sans-serif` },
+  { name: 'Space Grotesk', google: true, stack: `"Space Grotesk", ${sans}` },
+  { name: 'Chakra Petch', google: true, stack: `"Chakra Petch", ${sans}` },
+  { name: 'Audiowide', google: true, stack: `"Audiowide", ${sans}` },
+  { name: 'Bungee', google: true, stack: `"Bungee", ${sans}` },
+  { name: 'Russo One', google: true, stack: `"Russo One", ${sans}` },
+  { name: 'Righteous', google: true, stack: `"Righteous", ${sans}` },
+  { name: 'Black Ops One', google: true, stack: `"Black Ops One", ${sans}` },
+  { name: 'Rubik Mono One', google: true, stack: `"Rubik Mono One", ${sans}` },
+  { name: 'Permanent Marker', google: true, stack: `"Permanent Marker", cursive` },
+  { name: 'Pacifico', google: true, stack: `"Pacifico", cursive` },
+  { name: 'Georgia', stack: 'Georgia, "Times New Roman", serif' },
+  { name: 'Comic', stack: '"Comic Sans MS", "Marker Felt", cursive' },
+];
+
+const FONT_NAME = /^[A-Za-z0-9 ]{1,40}$/;
+/** Google Fonts family names a skin loads (plain names only). */
+export function validateFonts(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map((f) => String(f).trim()).filter((f) => FONT_NAME.test(f)))].slice(0, 6);
+}
+
+/** The Google Fonts a skin needs: the ones its two font tokens start with. */
+export function fontsFor(tokens, extra = []) {
+  const known = new Set([...DISPLAY_FONTS, ...LABEL_FONTS].filter((f) => f.google).map((f) => f.name));
+  const first = (v) => /^\s*"([^"]+)"/.exec(v || '')?.[1];
+  const wanted = [first(tokens['font-lcd']), first(tokens['font-ui'])].filter((n) => n && (known.has(n) || extra.includes(n)));
+  return validateFonts(wanted);
+}
+
+function applyFonts(fonts) {
+  const list = validateFonts(fonts);
+  let link = document.getElementById('skin-fonts');
+  if (!list.length) { link?.remove(); return; }
+  const href = `https://fonts.googleapis.com/css2?${list.map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}`).join('&')}&display=swap`;
+  if (link?.href === href) return;
+  link ??= Object.assign(document.createElement('link'), { id: 'skin-fonts', rel: 'stylesheet' });
+  link.href = href;
+  document.head.append(link);
+}
+
 // ---------- custom skin files ----------
 
 const SAFE_VALUE = /^[\w\s#%(),.\-+'"/]*$/;
@@ -197,7 +262,10 @@ export function parseSkinFile(text) {
     throw new Error('A skin file needs a "tokens" object — download the template to see the format');
   }
   const name = String(data.name || 'My skin').slice(0, MAX_NAME);
-  return { id: 'custom', name, tokens: validateTokens(data.tokens), layout: validateLayout(data.layout), art: validateArt(data.art) };
+  return {
+    id: 'custom', name, tokens: validateTokens(data.tokens), layout: validateLayout(data.layout), art: validateArt(data.art),
+    fonts: validateFonts(data.fonts), pictures: validatePictures(data.pictures).filter((p) => !p.src.startsWith('pic:')),
+  };
 }
 
 /** Keeps known tokens only and rejects values that could load anything (no url()). */
@@ -224,6 +292,7 @@ export function skinTemplate(base) {
     layoutOptions: { ...LAYOUT, width: `${WIDTH_RANGE[0]}-${WIDTH_RANGE[1]}` },
     art: validateArt(base.art),
     artOptions: { ...ART, strength: '0.1-1', seed: 'any whole number' },
+    fonts: validateFonts(base.fonts),
   }, null, 2);
 }
 
@@ -237,6 +306,8 @@ export function applySkin(s) {
   for (const key of Object.keys(LAYOUT)) root.dataset[key] = layout[key];
   delete root.dataset.tilt; // removed option: skins always sit straight
   root.style.setProperty('--deck-w', `${layout.width}px`);
+  applyFonts(s.fonts);
+  applyPictures(s.pictures);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', solidColor(all.bg));
   window.dispatchEvent(new Event('skinchange'));
 }

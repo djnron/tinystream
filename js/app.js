@@ -2,13 +2,15 @@ import * as downloads from './downloads.js';
 import { icons } from './icons.js';
 import { Player } from './player.js';
 import { getProvider, providers, registerHidden } from './providers/index.js';
-import { createRecord, downloadUrl, myRecords, openRecord, sharedSource, stopSharing } from './share.js';
+import { createRecord, downloadUrl, myRecords, openRecord, recordUrl, sharedSource, stopSharing } from './share.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
 import { paint as paintSkinArt, repaint as repaintSkinArt, setOtherDocument } from './skin-art.js';
 import { generateSkin, museumUrl } from './skin-generator.js';
+import { adoptPicture, setPictureDoc } from './pictures.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
+import { studioView } from './studio.js';
 import * as visualizer from './visualizer.js';
 
 const player = new Player();
@@ -28,6 +30,7 @@ const hashFor = {
   folder: (pid, id, name) => `#/b/${pid}/${encodeURIComponent(id)}/${encodeURIComponent(name)}`,
   saved: () => '#/saved',
   settings: () => '#/settings',
+  studio: () => '#/studio',
 };
 
 /** Breadcrumb trail for the folder being browsed: [{ pid, id, name }]. */
@@ -61,12 +64,20 @@ async function render() {
   if (route[0] === 'b') return browseView(route[1], route[2], route[3], stale);
   if (route[0] === 'saved') return savedView(stale);
   if (route[0] === 'settings') return settingsView(stale);
+  if (route[0] === 'studio') {
+    return studioView({
+      store, show, setTitle, currentSkin, openPreview: openFull, isWide: () => wide.matches,
+      useSkin: (sk) => { store.setSetting('skin', sk.id); applySkin(sk); },
+      paintArt: (sk) => paintSkinArt(sk),
+      fallbackSkin: () => SKINS[0],
+    });
+  }
   return homeView();
 }
 
 function setTitle(text) {
   // The logo already says Music Box, so the home screen's title shows the sections instead.
-  $('#title').textContent = text === 'Music Box' ? 'Home' : text;
+  $('#title').textContent = text === 'Music Box' ? 'Library' : text;
   document.title = text === 'Music Box' ? text : `${text} · Music Box`;
 }
 
@@ -167,43 +178,53 @@ function reconnectButton(p, after = render, label = `Reconnect ${p.label}`) {
 function homeView() {
   setTitle('Music Box');
   rows.clear();
-  const cards = Object.values(providers).map((p) => {
+  const sources = Object.values(providers).map((p) => {
     const configured = p.isConfigured();
     const connected = configured && p.isConnected();
     const isLocal = p.id === 'local';
     let status;
-    let actions;
+    let primary = null;
+    let extra = [];
     if (!configured) {
       status = 'Not set up — add your key in config.js (see README).';
     } else if (connected) {
-      status = isLocal ? `Playing from “${p.rootName}” · files stay on this device` : 'Connected · read-only access';
-      actions = [
-        h('a', { class: 'btn primary', href: hashFor.folder(p.id, p.rootId, p.rootName) }, 'Browse'),
-        isLocal && h('button', { class: 'btn', onclick: () => connect(p) }, 'Change folder'),
-        h('button', { class: 'btn', onclick: () => disconnect(p) }, isLocal ? 'Forget' : 'Disconnect'),
+      status = isLocal ? `“${p.rootName}” · files stay on this device` : 'Connected · read-only access';
+      primary = h('a', { class: 'btn primary', href: hashFor.folder(p.id, p.rootId, p.rootName) }, 'Browse');
+      extra = [
+        isLocal && h('button', { class: 'link', onclick: () => connect(p) }, 'Change folder'),
+        h('button', { class: 'link', onclick: () => disconnect(p) }, isLocal ? 'Forget' : 'Disconnect'),
       ];
     } else {
-      status = isLocal ? 'Play music from a folder on this computer or phone. No account needed.' : 'Not connected';
-      actions = [h('button', { class: 'btn primary', onclick: () => connect(p) },
-        isLocal ? 'Choose a music folder' : `Connect ${p.label}`)];
+      status = isLocal ? 'Any folder on this device. No account needed.' : 'Not connected';
+      primary = h('button', { class: 'btn', onclick: () => connect(p) }, isLocal ? 'Choose folder' : 'Connect');
     }
-    return h('section', { class: `card source ${configured ? '' : 'disabled'}` },
-      h('div', { class: 'card-head' }, iconSpan(isLocal ? 'folder' : 'cloud', `ico badge ${p.id}`),
-        h('div', {}, h('h2', {}, p.label), h('p', { class: 'muted' }, status))),
-      actions && h('div', { class: 'actions' }, actions));
+    return sourceRow(isLocal ? 'folder' : 'cloud', p.id, p.label, status, primary, extra, !configured);
   });
 
-  const device = store.settings.allowDownloads || store.savedIds.size
-    ? h('a', { class: 'card source link-card', href: hashFor.saved() },
-      h('div', { class: 'card-head' }, iconSpan('phone', 'ico badge device'),
-        h('div', {}, h('h2', {}, 'Saved for offline'),
-          h('p', { class: 'muted' }, `${store.savedIds.size} saved track${store.savedIds.size === 1 ? '' : 's'} · plays offline`))))
-    : h('section', { class: 'card hint' },
-      h('p', {}, h('strong', {}, 'Downloads are off. '),
-        'Cloud music streams and nothing is stored on this device. ',
-        h('a', { href: hashFor.settings() }, 'Change in Settings')));
+  const saved = store.settings.allowDownloads || store.savedIds.size
+    ? sourceRow('phone', 'device', 'Saved for offline',
+      `${store.savedIds.size} track${store.savedIds.size === 1 ? '' : 's'} · plays without a connection`,
+      h('a', { class: 'btn', href: hashFor.saved() }, 'Open'))
+    : sourceRow('phone', 'device', 'Downloads are off',
+      'Cloud music streams and nothing is stored on this device.',
+      h('a', { class: 'btn', href: hashFor.settings() }, 'Settings'));
 
-  show(h('div', { class: 'stack' }, pinsCard(), ...cards, device));
+  show(h('div', { class: 'stack home' },
+    h('section', {}, sectionTitle('My folders'), pinTiles()),
+    h('section', {}, sectionTitle('Sources'), h('div', { class: 'card source-list' }, ...sources, saved))));
+}
+
+/** A heading styled like a little window title bar, so the library wears the current skin too. */
+const sectionTitle = (text) => h('h2', { class: 'section-title' }, h('span', {}, text));
+
+function sourceRow(icon, id, label, status, primary, extra = [], disabled = false) {
+  return h('div', { class: `source-row${disabled ? ' disabled' : ''}` },
+    iconSpan(icon, `ico badge ${id}`),
+    h('div', { class: 'source-text' },
+      h('h3', {}, label),
+      h('p', { class: 'muted' }, status),
+      extra.some(Boolean) && h('div', { class: 'source-extra' }, extra)),
+    primary);
 }
 
 // ---------------------------------------------------------------- pinned folders ("My folders")
@@ -223,24 +244,29 @@ function togglePin(pid, id, name) {
   updatePlayerUi();
 }
 
-function pinsCard() {
+/** Pinned folders as record-sleeve tiles: tap to play, with open and unpin beside the name. */
+function pinTiles() {
   const list = pins();
-  return h('section', { class: 'card pins' },
-    h('h2', {}, 'My folders'),
-    list.length
-      ? h('ul', { class: 'list pin-list' }, list.map((f) => {
-        const p = getProvider(f.pid);
-        return h('li', { class: 'row' },
-          h('button', { class: 'row-main', onclick: () => playFolder(f), title: `Play everything in ${f.name}` },
-            iconSpan('play', 'ico folder'),
-            h('span', { class: 'row-text' },
-              h('span', { class: 'row-title' }, f.name),
-              h('span', { class: 'row-sub' }, p?.label || f.pid))),
-          h('a', { class: 'icon-btn', href: hashFor.folder(f.pid, f.id, f.name), title: 'Open folder', html: icons.folder }),
-          h('button', { class: 'icon-btn', title: 'Unpin', 'aria-label': `Unpin ${f.name}`, html: icons.close,
-            onclick: () => { togglePin(f.pid, f.id, f.name); render(); } }));
-      }))
-      : h('p', { class: 'muted' }, 'Pin folders while browsing (☆ Pin) to switch your music here in one tap.'));
+  if (!list.length) {
+    const first = Object.values(providers).find((p) => p.isConfigured() && p.isConnected());
+    return h('div', { class: 'tiles' },
+      h('div', { class: 'tile empty' },
+        h('p', {}, 'Pin folders while browsing (☆ Pin) and they show up here, one tap to play.'),
+        first && h('a', { class: 'btn', href: hashFor.folder(first.id, first.rootId, first.rootName) }, `Browse ${first.label}`)));
+  }
+  return h('ul', { class: 'tiles' }, list.map((f) => {
+    const p = getProvider(f.pid);
+    return h('li', { class: 'tile' },
+      h('button', { class: 'tile-play', onclick: () => playFolder(f), title: `Play everything in ${f.name}`, 'aria-label': `Play ${f.name}` },
+        h('span', { class: 'tile-art' },
+          h('span', { class: 'tile-lcd' }, f.name),
+          iconSpan('play', 'tile-go'))),
+      h('div', { class: 'tile-foot' },
+        h('span', { class: 'tile-sub' }, p?.label || f.pid),
+        h('a', { class: 'icon-btn', href: hashFor.folder(f.pid, f.id, f.name), title: 'Open folder', 'aria-label': `Open ${f.name}`, html: icons.folder }),
+        h('button', { class: 'icon-btn', title: 'Unpin', 'aria-label': `Unpin ${f.name}`, html: icons.close,
+          onclick: () => { togglePin(f.pid, f.id, f.name); render(); } })));
+  }));
 }
 
 /** Plays a whole folder, subfolders included, and remembers it as the current source. */
@@ -274,7 +300,7 @@ let currentSource = null;
 async function browseView(pid, folderId, name, stale) {
   const p = getProvider(pid);
   rows.clear();
-  if (!p) return show(message('Unknown source', null, h('a', { class: 'btn', href: '#/' }, 'Home')));
+  if (!p) return show(message('Unknown source', null, h('a', { class: 'btn', href: '#/' }, 'Library')));
   folderId ||= p.rootId;
   name ||= p.rootName;
   setTitle(name);
@@ -372,7 +398,7 @@ async function browseView(pid, folderId, name, stale) {
 }
 
 async function savedView(stale) {
-  setTitle('On this device');
+  setTitle('Saved for offline');
   rows.clear();
   const [list, info] = await Promise.all([store.listSaved().catch(() => []), store.storageInfo()]);
   if (stale()) return;
@@ -507,7 +533,8 @@ async function settingsView(stale) {
   const skinSection = h('section', { class: 'card' },
     h('h2', {}, 'Skin'),
     h('div', { class: 'actions gen' },
-      h('button', { class: 'btn primary big', onclick: generateAndApply }, iconSpan('dice'), 'Generate a skin')),
+      h('button', { class: 'btn primary big', onclick: generateAndApply }, iconSpan('dice'), 'Generate a skin'),
+      h('a', { class: 'btn big', href: hashFor.studio() }, '✎ Skin Studio')),
     h('p', { class: 'setting-desc' },
       'Each press mixes palettes from real classic skins in the ',
       h('a', { href: 'https://skins.webamp.org/', target: '_blank', rel: 'noopener' }, 'Winamp Skin Museum'),
@@ -521,7 +548,7 @@ async function settingsView(stale) {
         h('input', { type: 'file', accept: '.json,.mbskin,application/json', hidden: true, onchange: loadSkinFile })),
       h('button', { class: 'btn', onclick: downloadSkinTemplate }, 'Download skin template')),
     h('p', { class: 'setting-desc' },
-      'Make your own: download the template (it starts from the current skin), change the colors, gradients and fonts, then load it here.'));
+      'Make your own in the Skin Studio: colors, fonts, your own pictures, the player’s shape, artwork and effects. It starts from the current skin.'));
 
   const accounts = h('section', { class: 'card' },
     h('h2', {}, 'Accounts'),
@@ -547,7 +574,7 @@ async function settingsView(stale) {
 // ---------------------------------------------------------------- skins
 
 function allSkins() {
-  return store.settings.customSkin ? [...SKINS, store.settings.customSkin] : SKINS;
+  return [...SKINS, ...(store.settings.customSkin ? [store.settings.customSkin] : []), ...(store.settings.mySkins || [])];
 }
 
 function currentSkin() {
@@ -648,12 +675,13 @@ const PENDING_SHARE = 'mb.pendingShare';
 function modal(...children) {
   const dlg = h('dialog', { class: 'modal' }, ...children);
   dlg.addEventListener('close', () => dlg.remove());
-  document.body.append(dlg);
+  // When the player is popped out, show dialogs there (that's where the person is looking).
+  (popDoc && popDoc.hasFocus() ? popDoc : document).body.append(dlg);
   dlg.showModal();
   return dlg;
 }
 
-async function openShareDialog({ pid, folderId, name, title, noDownload = true }, { auto = false } = {}) {
+async function openShareDialog({ pid, folderId, name, title, noDownload = true, withPictures = true }, { auto = false } = {}) {
   const p = getProvider(pid);
   const t = toast(`Collecting songs in “${name}”…`, { timeout: 0 });
   let tracks;
@@ -669,6 +697,8 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
   const where = pid === 'gdrive' ? 'Google Drive' : 'Dropbox';
   const titleInput = h('input', { type: 'text', value: title || name, maxlength: 80, 'aria-label': 'Record title' });
   const lock = h('input', { type: 'checkbox', checked: noDownload });
+  const pictureCount = skin.pictures?.length || 0;
+  const pics = h('input', { type: 'checkbox', checked: withPictures && pictureCount > 0 });
   const status = h('p', { class: 'setting-desc', role: 'status' });
   const go = h('button', { class: 'btn primary' }, 'Create link');
   const body = h('div', { class: 'modal-body' },
@@ -680,6 +710,12 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
         h('span', { class: 'setting-desc' }, 'Listeners get no download or save buttons. A deterrent, not a lock: '
           + 'someone technical could still save what their browser plays.')),
       lock),
+    pictureCount > 0 && h('label', { class: 'setting' },
+      h('span', { class: 'setting-text' },
+        h('span', { class: 'setting-label' }, `Include my picture${pictureCount === 1 ? '' : 's'}`),
+        h('span', { class: 'setting-desc' }, `Your skin’s ${pictureCount === 1 ? 'picture is' : `${pictureCount} pictures are`} saved next to the songs `
+          + '(in a “Music Box pictures” folder) and shared by link with them. Pictures from web links travel as links.')),
+      pics),
     h('p', { class: 'setting-desc' },
       `${Math.min(tracks.length, 300)} song${tracks.length === 1 ? '' : 's'} from ${where}`,
       tracks.length > 300 ? ' (the first 300)' : '',
@@ -699,12 +735,33 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
         tracks,
         skin,
         noDownload: lock.checked,
+        withPictures: pics.checked,
+        source: { pid, id: folderId },
         onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} / ${total}`; },
       });
       showShareResult(body, url, truncated);
     } catch (err) {
       go.disabled = false;
-      if (err.code === 'dropbox-scope') {
+      const pending = () => ({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked, withPictures: pics.checked });
+      if (err.code === 'dropbox-picture-scope') {
+        status.replaceChildren(h('div', { class: 'callout' },
+          h('strong', {}, 'One-time step: let Dropbox save your pictures'),
+          h('ol', { class: 'steps' },
+            h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
+              ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
+              h('strong', {}, 'files.content.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
+            h('li', {}, 'Come back and press the button below. Dropbox asks you to approve, then your link is made.')),
+          h('p', { class: 'setting-desc' }, 'Music Box only ever writes into its own app folder, in “Music Box pictures”.'),
+          h('div', { class: 'actions' },
+            h('button', { class: 'btn', onclick: () => { pics.checked = false; go.click(); } }, 'Share without pictures'),
+            h('button', {
+              class: 'btn primary',
+              onclick: () => {
+                sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending()));
+                providers.dropbox.connect({ sharing: true, pictures: true, back: location.hash });
+              },
+            }, 'Continue to Dropbox →'))));
+      } else if (err.code === 'dropbox-scope') {
         status.replaceChildren(h('div', { class: 'callout' },
           h('strong', {}, 'One-time step: let Dropbox make share links'),
           h('ol', { class: 'steps' },
@@ -716,8 +773,8 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
           h('button', {
             class: 'btn primary',
             onclick: () => {
-              sessionStorage.setItem(PENDING_SHARE, JSON.stringify({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked }));
-              providers.dropbox.connect({ sharing: true, back: location.hash });
+              sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending()));
+              providers.dropbox.connect({ sharing: true, pictures: pics.checked && pictureCount > 0, back: location.hash });
             },
           }, 'Continue to Dropbox →')));
         go.hidden = true; // the only way forward is approving in Dropbox
@@ -756,7 +813,35 @@ function dropboxSharingHelp(detail, pending) {
       }, 'Try again'))));
 }
 
-function showShareResult(body, url, truncated) {
+/**
+ * The player's Share button: shares the folder (or record) that's playing. A record already made
+ * from that folder is offered again, so its link doesn't change; otherwise this makes one.
+ */
+function sharePlaying() {
+  const src = currentSource;
+  if (!src || !player.current) return toast('Play a folder first, then share it from here');
+  if (src.pid === 'record') {
+    const body = h('div', { class: 'modal-body' });
+    modal(body);
+    return showShareResult(body, recordUrl(src.id), false, { title: src.name, forwarding: true });
+  }
+  if (src.pid !== 'gdrive' && src.pid !== 'dropbox') {
+    return toast('Songs from this device can’t be shared by link. Google Drive and Dropbox songs can.');
+  }
+  const existing = myRecords().find((r) => r.source?.pid === src.pid && r.source?.id === src.id);
+  if (existing) {
+    const body = h('div', { class: 'modal-body' });
+    const dlg = modal(body);
+    showShareResult(body, existing.url, false, {
+      title: existing.title,
+      again: () => { dlg.close(); openShareDialog({ pid: src.pid, folderId: src.id, name: src.name }); },
+    });
+    return null;
+  }
+  return openShareDialog({ pid: src.pid, folderId: src.id, name: src.name });
+}
+
+function showShareResult(body, url, truncated, { title = '', again = null, forwarding = false } = {}) {
   const field = h('input', { type: 'text', readonly: true, value: url, 'aria-label': 'Record link', onfocus: (e) => e.target.select() });
   const copy = h('button', {
     class: 'btn primary',
@@ -770,15 +855,25 @@ function showShareResult(body, url, truncated) {
       }
     },
   }, 'Copy link');
+  const text = title ? `“${title}”: a record for you on Music Box` : 'A record for you on Music Box';
+  const enc = encodeURIComponent;
   body.replaceChildren(
-    h('h2', {}, '✓ Your record is ready'),
-    h('p', { class: 'setting-desc' }, 'Anyone with this link can listen, no account needed.',
+    h('h2', {}, forwarding ? '⤴ Pass this record on' : again ? `⤴ Share “${title}”` : '✓ Your record is ready'),
+    h('p', { class: 'setting-desc' },
+      forwarding ? 'Someone shared this with you. Anyone with the link can listen, no account needed.'
+        : again ? 'You already made a link for this folder. Anyone with it can listen, no account needed.'
+          : 'Anyone with this link can listen, no account needed.',
       truncated ? ' Only the first 300 songs are included.' : ''),
     field,
     h('div', { class: 'actions' },
       copy,
-      navigator.share && h('button', { class: 'btn', onclick: () => navigator.share({ title: 'A record for you', url }).catch(() => {}) }, 'Share…'),
-      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open'),
+      navigator.share && h('button', { class: 'btn', onclick: () => navigator.share({ title: text, url }).catch(() => {}) }, iconSpan('share'), 'Share…'),
+      h('a', { class: 'btn', href: `mailto:?subject=${enc(text)}&body=${enc(`${text}\n\n${url}`)}` }, 'Email'),
+      h('a', { class: 'btn', href: `sms:?&body=${enc(`${text} ${url}`)}` }, 'Message'),
+      h('a', { class: 'btn', href: `https://wa.me/?text=${enc(`${text} ${url}`)}`, target: '_blank', rel: 'noopener' }, 'WhatsApp'),
+      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open')),
+    h('div', { class: 'actions' },
+      again && h('button', { class: 'btn', onclick: again }, 'Make a new link'),
       h('button', { class: 'btn', onclick: () => body.closest('dialog').close() }, 'Done')));
 }
 
@@ -854,10 +949,22 @@ async function recordView(payload, stale) {
       h('div', { class: 'actions' },
         h('button', { class: 'btn primary', onclick: () => play(false) }, iconSpan('play'), 'Play'),
         h('button', { class: 'btn', onclick: () => play(true) }, iconSpan('shuffle'), 'Shuffle'),
+        rec.linkPictures?.length && h('button', {
+          class: 'btn',
+          title: 'These pictures load from other websites, which will see your visit',
+          onclick: (e) => {
+            rec.skin.pictures = [...rec.skin.pictures, ...rec.linkPictures].slice(0, 4);
+            rec.linkPictures = [];
+            applySkin(rec.skin);
+            e.currentTarget.remove();
+          },
+        }, `Show pictures from ${[...new Set(rec.linkPictures.map((p) => new URL(p.src).hostname))].join(', ')}`),
         rec.skin && h('button', {
           class: 'btn',
-          onclick: () => {
-            const keep = { ...rec.skin, id: 'custom', inspiredBy: [] };
+          onclick: async () => {
+            // Keep a copy of the record's pictures on this device, so the skin doesn't depend on the sender.
+            const pictures = await Promise.all((rec.skin.pictures || []).map(adoptPicture));
+            const keep = { ...rec.skin, id: 'custom', inspiredBy: [], pictures: pictures.filter(Boolean) };
             store.setSetting('customSkin', keep);
             recordSkin = null;
             useSkin(keep);
@@ -954,6 +1061,7 @@ function buildPlayerUi() {
           h('button', { class: 'tb-btn', id: 'btn-stage', title: 'Stage mode: make the player fill the page (F)', 'aria-label': 'Stage mode', html: icons.stage, onclick: () => setStage(!store.settings.stage) }),
           h('button', { class: 'tb-btn', id: 'btn-songs', title: 'Show the song list', 'aria-label': 'Show the song list', 'aria-expanded': 'false', onclick: () => toggleSongs() },
             h('span', { class: 'btn-ico', html: icons.library }), h('span', {}, 'SONGS')),
+          h('button', { class: 'tb-btn', id: 'btn-share', title: 'Share what’s playing', 'aria-label': 'Share what’s playing', html: icons.share, onclick: sharePlaying }),
           canPopOut() && h('button', { class: 'tb-btn', id: 'btn-popout', title: 'Pop out: float the player above other windows', 'aria-label': 'Pop out player', html: icons.popout, onclick: () => (popWin ? popIn() : popOut()) }),
           h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull }))),
       // Every part of the deck is a direct grid item, so skins can arrange them freely (see the
@@ -1289,6 +1397,7 @@ async function popOut() {
   }
   popWin = win;
   popDoc = win.document;
+  setPictureDoc(popDoc);
   popDoc.title = 'Music Box';
   // Same styles as the page: copy our stylesheet's rules in (a <link> isn't reliably applied in a
   // picture-in-picture window), plus the skin's variables and layout attributes.
@@ -1348,6 +1457,7 @@ function popIn() {
   const list = popDoc.querySelector('.playlist');
   const win = popWin;
   popWin = null;
+  if (popDoc) setPictureDoc(popDoc, false);
   popDoc = null;
   rootSync?.disconnect();
   setOtherDocument(null);

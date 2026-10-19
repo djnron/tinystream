@@ -64,7 +64,7 @@ function dropboxPath(url) {
  * Shares the tracks and returns { url, record }. `onProgress(done, total)` reports sharing progress.
  * Throws { code: 'dropbox-scope' } when Dropbox needs the extra sharing permission first.
  */
-export async function createRecord({ title, tracks, skin, noDownload, withPictures = true, onProgress }) {
+export async function createRecord({ title, tracks, skin, noDownload, withPictures = true, source = null, onProgress }) {
   const list = tracks.slice(0, MAX_TRACKS);
   const items = [];
   // Pictures first: if Dropbox needs a permission for them, nothing has been shared yet.
@@ -99,6 +99,7 @@ export async function createRecord({ title, tracks, skin, noDownload, withPictur
     title,
     url,
     noDownload,
+    source: source || undefined, // the folder it was made from, so the player's Share can offer it again
     created: Date.now(),
     count: items.length,
     items: [...items, ...pics.items].map((x) => ({ src: x.src, ref: x.ref, url: x.url })),

@@ -2,7 +2,7 @@ import * as downloads from './downloads.js';
 import { icons } from './icons.js';
 import { Player } from './player.js';
 import { getProvider, providers, registerHidden } from './providers/index.js';
-import { createRecord, downloadUrl, myRecords, openRecord, sharedSource, stopSharing } from './share.js';
+import { createRecord, downloadUrl, myRecords, openRecord, recordUrl, sharedSource, stopSharing } from './share.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
@@ -675,7 +675,8 @@ const PENDING_SHARE = 'mb.pendingShare';
 function modal(...children) {
   const dlg = h('dialog', { class: 'modal' }, ...children);
   dlg.addEventListener('close', () => dlg.remove());
-  document.body.append(dlg);
+  // When the player is popped out, show dialogs there (that's where the person is looking).
+  (popDoc && popDoc.hasFocus() ? popDoc : document).body.append(dlg);
   dlg.showModal();
   return dlg;
 }
@@ -735,6 +736,7 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
         skin,
         noDownload: lock.checked,
         withPictures: pics.checked,
+        source: { pid, id: folderId },
         onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} / ${total}`; },
       });
       showShareResult(body, url, truncated);
@@ -811,7 +813,35 @@ function dropboxSharingHelp(detail, pending) {
       }, 'Try again'))));
 }
 
-function showShareResult(body, url, truncated) {
+/**
+ * The player's Share button: shares the folder (or record) that's playing. A record already made
+ * from that folder is offered again, so its link doesn't change; otherwise this makes one.
+ */
+function sharePlaying() {
+  const src = currentSource;
+  if (!src || !player.current) return toast('Play a folder first, then share it from here');
+  if (src.pid === 'record') {
+    const body = h('div', { class: 'modal-body' });
+    modal(body);
+    return showShareResult(body, recordUrl(src.id), false, { title: src.name, forwarding: true });
+  }
+  if (src.pid !== 'gdrive' && src.pid !== 'dropbox') {
+    return toast('Songs from this device can’t be shared by link. Google Drive and Dropbox songs can.');
+  }
+  const existing = myRecords().find((r) => r.source?.pid === src.pid && r.source?.id === src.id);
+  if (existing) {
+    const body = h('div', { class: 'modal-body' });
+    const dlg = modal(body);
+    showShareResult(body, existing.url, false, {
+      title: existing.title,
+      again: () => { dlg.close(); openShareDialog({ pid: src.pid, folderId: src.id, name: src.name }); },
+    });
+    return null;
+  }
+  return openShareDialog({ pid: src.pid, folderId: src.id, name: src.name });
+}
+
+function showShareResult(body, url, truncated, { title = '', again = null, forwarding = false } = {}) {
   const field = h('input', { type: 'text', readonly: true, value: url, 'aria-label': 'Record link', onfocus: (e) => e.target.select() });
   const copy = h('button', {
     class: 'btn primary',
@@ -825,15 +855,25 @@ function showShareResult(body, url, truncated) {
       }
     },
   }, 'Copy link');
+  const text = title ? `“${title}”: a record for you on Music Box` : 'A record for you on Music Box';
+  const enc = encodeURIComponent;
   body.replaceChildren(
-    h('h2', {}, '✓ Your record is ready'),
-    h('p', { class: 'setting-desc' }, 'Anyone with this link can listen, no account needed.',
+    h('h2', {}, forwarding ? '⤴ Pass this record on' : again ? `⤴ Share “${title}”` : '✓ Your record is ready'),
+    h('p', { class: 'setting-desc' },
+      forwarding ? 'Someone shared this with you. Anyone with the link can listen, no account needed.'
+        : again ? 'You already made a link for this folder. Anyone with it can listen, no account needed.'
+          : 'Anyone with this link can listen, no account needed.',
       truncated ? ' Only the first 300 songs are included.' : ''),
     field,
     h('div', { class: 'actions' },
       copy,
-      navigator.share && h('button', { class: 'btn', onclick: () => navigator.share({ title: 'A record for you', url }).catch(() => {}) }, 'Share…'),
-      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open'),
+      navigator.share && h('button', { class: 'btn', onclick: () => navigator.share({ title: text, url }).catch(() => {}) }, iconSpan('share'), 'Share…'),
+      h('a', { class: 'btn', href: `mailto:?subject=${enc(text)}&body=${enc(`${text}\n\n${url}`)}` }, 'Email'),
+      h('a', { class: 'btn', href: `sms:?&body=${enc(`${text} ${url}`)}` }, 'Message'),
+      h('a', { class: 'btn', href: `https://wa.me/?text=${enc(`${text} ${url}`)}`, target: '_blank', rel: 'noopener' }, 'WhatsApp'),
+      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open')),
+    h('div', { class: 'actions' },
+      again && h('button', { class: 'btn', onclick: again }, 'Make a new link'),
       h('button', { class: 'btn', onclick: () => body.closest('dialog').close() }, 'Done')));
 }
 
@@ -1021,6 +1061,7 @@ function buildPlayerUi() {
           h('button', { class: 'tb-btn', id: 'btn-stage', title: 'Stage mode: make the player fill the page (F)', 'aria-label': 'Stage mode', html: icons.stage, onclick: () => setStage(!store.settings.stage) }),
           h('button', { class: 'tb-btn', id: 'btn-songs', title: 'Show the song list', 'aria-label': 'Show the song list', 'aria-expanded': 'false', onclick: () => toggleSongs() },
             h('span', { class: 'btn-ico', html: icons.library }), h('span', {}, 'SONGS')),
+          h('button', { class: 'tb-btn', id: 'btn-share', title: 'Share what’s playing', 'aria-label': 'Share what’s playing', html: icons.share, onclick: sharePlaying }),
           canPopOut() && h('button', { class: 'tb-btn', id: 'btn-popout', title: 'Pop out: float the player above other windows', 'aria-label': 'Pop out player', html: icons.popout, onclick: () => (popWin ? popIn() : popOut()) }),
           h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull }))),
       // Every part of the deck is a direct grid item, so skins can arrange them freely (see the

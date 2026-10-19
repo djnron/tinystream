@@ -12,6 +12,8 @@ const PKCE_KEY = 'mb.dropbox.pkce';
 const SCOPES = 'files.metadata.read files.content.read';
 // Asked for only when you first share a record (tick these in the Dropbox app console too).
 const SHARING_SCOPES = 'sharing.read sharing.write';
+// Asked for only when someone shares a record with their own pictures (to save them in the app folder).
+const PICTURE_SCOPES = 'files.content.write';
 
 const redirectUri = () => location.origin + location.pathname;
 
@@ -136,7 +138,7 @@ export const dropbox = {
   isConnected: () => Boolean(readToken()),
 
   /** Leaves the page for Dropbox's consent screen; handleRedirect() finishes on return. */
-  async connect({ sharing = false, back = location.hash } = {}) {
+  async connect({ sharing = false, pictures = false, back = location.hash } = {}) {
     const verifier = randomString(64);
     const state = randomString(16);
     sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state, back }));
@@ -148,10 +150,10 @@ export const dropbox = {
       code_challenge_method: 'S256',
       redirect_uri: redirectUri(),
       token_access_type: 'offline', // gives a refresh token so playback isn't cut off after 4 hours
-      scope: sharing ? `${SCOPES} ${SHARING_SCOPES}` : SCOPES,
+      scope: [SCOPES, sharing && SHARING_SCOPES, pictures && PICTURE_SCOPES].filter(Boolean).join(' '),
       state,
     });
-    if (sharing) params.set('include_granted_scopes', 'user');
+    if (sharing || pictures) params.set('include_granted_scopes', 'user');
     location.assign(`https://www.dropbox.com/oauth2/authorize?${params}`);
     return new Promise(() => {}); // the page is navigating away
   },
@@ -163,6 +165,35 @@ export const dropbox = {
   /** True once the sharing permission has been granted (needed to make share links). */
   canShare() {
     return /\bsharing\.write\b/.test(readToken()?.scope || '');
+  },
+
+  /** True once Dropbox lets the app save files (only needed to share records with pictures). */
+  canUploadPictures() {
+    return /\bfiles\.content\.write\b/.test(readToken()?.scope || '');
+  },
+
+  /**
+   * Saves a skin picture in the app folder ("Music Box pictures") and shares it by link, for shared
+   * records. Returns { url, id }: the share link and the file's id.
+   */
+  async uploadPicture(blob, name) {
+    const scopeError = () => Object.assign(new Error('Dropbox needs permission to save pictures'), { code: 'dropbox-picture-scope' });
+    if (!this.canUploadPictures()) throw scopeError();
+    let meta;
+    try {
+      meta = await (await call('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Dropbox-API-Arg': headerJson({ path: `/Music Box pictures/${name}`, mode: 'overwrite', mute: true }),
+        },
+        body: blob,
+      })).json();
+    } catch (err) {
+      if (/missing_scope|files\.content\.write/.test(err.message)) throw scopeError();
+      throw err;
+    }
+    return { url: await this.shareFile(meta.id), id: meta.id };
   },
 
   /** Creates (or reuses) a public share link for one file and returns its URL. */

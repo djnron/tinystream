@@ -153,13 +153,118 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   };
 
   // Chrome from skin A, screen + playlist from skin B.
-  const frame = P(a.frame);
-  const title = P(a.title);
-  let button = P(a.button);
-  const lcdBg = P(b.lcd);
-  const digits = readable(P(b.digits), lcdBg, 4.5);
-  const [listText, listCurrent, listBg, listSelect] = b.list.map(P);
-  const [, visTop, visMid, visBottom, , visPeak] = b.vis.map(P);
+  const palette = {
+    frame: P(a.frame), title: P(a.title), button: P(a.button), glyph: P(a.glyph), marquee: P(a.marquee),
+    lcd: P(b.lcd), digits: P(b.digits), list: b.list.map(P), vis: b.vis.map(P), font: a.font,
+  };
+  const tokens = tokensFromPalette(palette, rand);
+  const layout = rollLayout(rand, pick, previous);
+  const name = randomName(rand);
+  const inspiredBy = [a, b].filter((s, i, all) => all.indexOf(s) === i).map((s) => ({ name: s.name, id: s.id }));
+  return { id: 'custom', name, tokens, layout, art: validateArt(rollArt(rand, tokens)), inspiredBy };
+}
+
+/** A fun random skin name. */
+export function randomName(rand = Math.random) {
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  return `${pick(ADJECTIVES)} ${pick(NOUNS)}${pick(SUFFIXES)}`;
+}
+
+/** A seeded random number generator (mulberry32), so the same seed rolls the same choices. */
+export function seeded(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = (t + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(t ^ (t >>> 15), 1 | t);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * A few hand-picked colors -> a full palette in the museum's shape, so the same token mapping (and
+ * its contrast checks) works for colors a person picks, or colors taken from a picture.
+ */
+export function paletteFromColors({ body, title, buttons, screen, digits }) {
+  return {
+    frame: body,
+    title,
+    button: buttons,
+    glyph: bw(buttons),
+    marquee: digits,
+    lcd: screen,
+    digits,
+    list: [digits, light(digits, 0.25), screen, mix(title, screen, 0.5)],
+    vis: [screen, light(digits, 0.2), digits, hue(digits, -40), screen, light(digits, 0.35)],
+    font: '',
+  };
+}
+
+/** The five "easy" colors of a skin, read back from its tokens (for the color pickers). */
+export function colorsFromTokens(t) {
+  const c = (v, fallback) => solid(v) || fallback;
+  return {
+    body: c(t['deck-bg'], '#2a2c36'),
+    title: c(t['titlebar-bg'], '#2a3a8c'),
+    buttons: c(t['btn-face'], '#3a3c4a'),
+    screen: c(t['lcd-bg'], '#05080a'),
+    digits: c(t['lcd-text'], '#3dff6e'),
+  };
+}
+
+const solid = (v) => {
+  const m = /#[0-9a-f]{6}\b|#[0-9a-f]{3}\b/i.exec(v || '');
+  if (!m) return null;
+  const hex = m[0];
+  return hex.length === 4 ? `#${[...hex.slice(1)].map((x) => x + x).join('')}` : hex.toLowerCase();
+};
+
+/** The most distinct, lively colors in an image, as the five easy colors. */
+export function colorsFromImage(img) {
+  const size = 48;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0, size, size);
+  const data = g.getImageData(0, 0, size, size).data;
+  // Bucket colors coarsely and count them.
+  const buckets = new Map();
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue;
+    const key = ((data[i] >> 4) << 8) | ((data[i + 1] >> 4) << 4) | (data[i + 2] >> 4);
+    const b = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+    b.n++; b.r += data[i]; b.g += data[i + 1]; b.b += data[i + 2];
+    buckets.set(key, b);
+  }
+  const colors = [...buckets.values()].sort((x, y) => y.n - x.n)
+    .map((b) => toHex([b.r / b.n, b.g / b.n, b.b / b.n]));
+  if (!colors.length) return null;
+  const byLight = [...colors.slice(0, 24)].sort((x, y) => luminance(x) - luminance(y));
+  const vivid = [...colors.slice(0, 40)].sort((x, y) => sat(y) * (0.4 + luminance(y)) - sat(x) * (0.4 + luminance(x)));
+  const body = colors[0];
+  const dark = byLight[0];
+  const pop = vivid[0];
+  const second = vivid.find((c) => contrast(c, pop) > 1.6) || hue(pop, 150);
+  return {
+    body,
+    title: second,
+    buttons: mix(body, second, 0.25),
+    screen: luminance(dark) < 0.08 ? dark : withL(dark, 0.06),
+    digits: pop,
+  };
+}
+
+/** Maps a palette onto every skin token, fixing contrast so text always reads. */
+export function tokensFromPalette(pal, rand = Math.random) {
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  const frame = pal.frame;
+  const title = pal.title;
+  let button = pal.button;
+  const lcdBg = pal.lcd;
+  const digits = readable(pal.digits, lcdBg, 4.5);
+  const [listText, listCurrent, listBg, listSelect] = pal.list;
+  const [, visTop, visMid, visBottom, , visPeak] = pal.vis;
 
   // Page colors follow the deck: dark deck -> dark page, light deck -> light page.
   // Usually the page follows the deck (dark deck, dark page); sometimes it's flipped on purpose.
@@ -169,7 +274,7 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   const surface = dark ? light(bg, 0.05) : mix(bg, '#ffffff', 0.7);
   const surface2 = dark ? light(bg, 0.1) : light(bg, -0.05);
   const text = dark ? withL(frame, 0.92, 0.25) : withL(frame, 0.12, 0.3);
-  const candidates = [digits, visTop, listCurrent, P(a.marquee), listSelect]
+  const candidates = [digits, visTop, listCurrent, pal.marquee, listSelect]
     .map((c) => readable(c, bg, 3))
     .sort((x, y) => sat(y) - sat(x));
   const accent = candidates[0];
@@ -210,7 +315,7 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
   const btnStops = () => [light(button, 0.08), button, light(button, -0.06)];
   for (let i = 0; i < 6 && !feasible([...btnStops(), ...deckStops], 3); i++) button = mix(button, frame, 0.4);
   const [btnTop, , btnBottom] = btnStops();
-  const glyph = readable(P(a.glyph), [...btnStops(), ...deckStops], 3);
+  const glyph = readable(pal.glyph, [...btnStops(), ...deckStops], 3);
 
   const tokens = {
     bg,
@@ -223,7 +328,7 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
     'surface-2': surface2,
     line: dark ? '#ffffff14' : '#00000018',
     radius: pick(RADII),
-    'font-ui': uiFont(a.font, rand()),
+    'font-ui': uiFont(pal.font, rand()),
     'deck-bg': deckBg,
     'bevel-light': light(frame, 0.18),
     'bevel-dark': light(frame, -0.3),
@@ -245,18 +350,14 @@ export async function generateSkin({ previous = null, rand = Math.random } = {})
     'list-select': listSelect,
   };
 
-  const layout = rollLayout(rand, pick, previous);
-  const name = `${pick(ADJECTIVES)} ${pick(NOUNS)}${pick(SUFFIXES)}`;
-  const inspiredBy = [a, b].filter((s, i, all) => all.indexOf(s) === i).map((s) => ({ name: s.name, id: s.id }));
-  const clean = validateTokens(tokens);
-  return { id: 'custom', name, tokens: clean, layout, art: validateArt(rollArt(rand, clean)), inspiredBy };
+  return validateTokens(tokens);
 }
 
 /**
  * A random player layout. Every option is equally likely, except side and order (which lean to the
  * default) and the wild extras (shape, tilt, pattern, effect), which are on more often than off.
  */
-function rollLayout(rand, pick, previous) {
+export function rollLayout(rand, pick, previous) {
   const layout = Object.fromEntries(Object.entries(LAYOUT).map(([key, options]) => [key, pick(options)]));
   for (const key of ['shape', 'pattern', 'fx']) {
     if (layout[key] === LAYOUT[key][0] && rand() < 0.6) layout[key] = pick(LAYOUT[key].slice(1));

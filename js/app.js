@@ -8,7 +8,9 @@ import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './
 import { lcdDigits, lcdTime } from './lcd.js';
 import { paint as paintSkinArt, repaint as repaintSkinArt, setOtherDocument } from './skin-art.js';
 import { generateSkin, museumUrl } from './skin-generator.js';
+import { adoptPicture, setPictureDoc } from './pictures.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
+import { studioView } from './studio.js';
 import * as visualizer from './visualizer.js';
 
 const player = new Player();
@@ -28,6 +30,7 @@ const hashFor = {
   folder: (pid, id, name) => `#/b/${pid}/${encodeURIComponent(id)}/${encodeURIComponent(name)}`,
   saved: () => '#/saved',
   settings: () => '#/settings',
+  studio: () => '#/studio',
 };
 
 /** Breadcrumb trail for the folder being browsed: [{ pid, id, name }]. */
@@ -61,6 +64,14 @@ async function render() {
   if (route[0] === 'b') return browseView(route[1], route[2], route[3], stale);
   if (route[0] === 'saved') return savedView(stale);
   if (route[0] === 'settings') return settingsView(stale);
+  if (route[0] === 'studio') {
+    return studioView({
+      store, show, setTitle, currentSkin, openPreview: openFull, isWide: () => wide.matches,
+      useSkin: (sk) => { store.setSetting('skin', sk.id); applySkin(sk); },
+      paintArt: (sk) => paintSkinArt(sk),
+      fallbackSkin: () => SKINS[0],
+    });
+  }
   return homeView();
 }
 
@@ -522,7 +533,8 @@ async function settingsView(stale) {
   const skinSection = h('section', { class: 'card' },
     h('h2', {}, 'Skin'),
     h('div', { class: 'actions gen' },
-      h('button', { class: 'btn primary big', onclick: generateAndApply }, iconSpan('dice'), 'Generate a skin')),
+      h('button', { class: 'btn primary big', onclick: generateAndApply }, iconSpan('dice'), 'Generate a skin'),
+      h('a', { class: 'btn big', href: hashFor.studio() }, '✎ Skin Studio')),
     h('p', { class: 'setting-desc' },
       'Each press mixes palettes from real classic skins in the ',
       h('a', { href: 'https://skins.webamp.org/', target: '_blank', rel: 'noopener' }, 'Winamp Skin Museum'),
@@ -536,7 +548,7 @@ async function settingsView(stale) {
         h('input', { type: 'file', accept: '.json,.mbskin,application/json', hidden: true, onchange: loadSkinFile })),
       h('button', { class: 'btn', onclick: downloadSkinTemplate }, 'Download skin template')),
     h('p', { class: 'setting-desc' },
-      'Make your own: download the template (it starts from the current skin), change the colors, gradients and fonts, then load it here.'));
+      'Make your own in the Skin Studio: colors, fonts, your own pictures, the player’s shape, artwork and effects. It starts from the current skin.'));
 
   const accounts = h('section', { class: 'card' },
     h('h2', {}, 'Accounts'),
@@ -562,7 +574,7 @@ async function settingsView(stale) {
 // ---------------------------------------------------------------- skins
 
 function allSkins() {
-  return store.settings.customSkin ? [...SKINS, store.settings.customSkin] : SKINS;
+  return [...SKINS, ...(store.settings.customSkin ? [store.settings.customSkin] : []), ...(store.settings.mySkins || [])];
 }
 
 function currentSkin() {
@@ -668,7 +680,7 @@ function modal(...children) {
   return dlg;
 }
 
-async function openShareDialog({ pid, folderId, name, title, noDownload = true }, { auto = false } = {}) {
+async function openShareDialog({ pid, folderId, name, title, noDownload = true, withPictures = true }, { auto = false } = {}) {
   const p = getProvider(pid);
   const t = toast(`Collecting songs in “${name}”…`, { timeout: 0 });
   let tracks;
@@ -684,6 +696,8 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
   const where = pid === 'gdrive' ? 'Google Drive' : 'Dropbox';
   const titleInput = h('input', { type: 'text', value: title || name, maxlength: 80, 'aria-label': 'Record title' });
   const lock = h('input', { type: 'checkbox', checked: noDownload });
+  const pictureCount = skin.pictures?.length || 0;
+  const pics = h('input', { type: 'checkbox', checked: withPictures && pictureCount > 0 });
   const status = h('p', { class: 'setting-desc', role: 'status' });
   const go = h('button', { class: 'btn primary' }, 'Create link');
   const body = h('div', { class: 'modal-body' },
@@ -695,6 +709,12 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
         h('span', { class: 'setting-desc' }, 'Listeners get no download or save buttons. A deterrent, not a lock: '
           + 'someone technical could still save what their browser plays.')),
       lock),
+    pictureCount > 0 && h('label', { class: 'setting' },
+      h('span', { class: 'setting-text' },
+        h('span', { class: 'setting-label' }, `Include my picture${pictureCount === 1 ? '' : 's'}`),
+        h('span', { class: 'setting-desc' }, `Your skin’s ${pictureCount === 1 ? 'picture is' : `${pictureCount} pictures are`} saved next to the songs `
+          + '(in a “Music Box pictures” folder) and shared by link with them. Pictures from web links travel as links.')),
+      pics),
     h('p', { class: 'setting-desc' },
       `${Math.min(tracks.length, 300)} song${tracks.length === 1 ? '' : 's'} from ${where}`,
       tracks.length > 300 ? ' (the first 300)' : '',
@@ -714,12 +734,32 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
         tracks,
         skin,
         noDownload: lock.checked,
+        withPictures: pics.checked,
         onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} / ${total}`; },
       });
       showShareResult(body, url, truncated);
     } catch (err) {
       go.disabled = false;
-      if (err.code === 'dropbox-scope') {
+      const pending = () => ({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked, withPictures: pics.checked });
+      if (err.code === 'dropbox-picture-scope') {
+        status.replaceChildren(h('div', { class: 'callout' },
+          h('strong', {}, 'One-time step: let Dropbox save your pictures'),
+          h('ol', { class: 'steps' },
+            h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
+              ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
+              h('strong', {}, 'files.content.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
+            h('li', {}, 'Come back and press the button below. Dropbox asks you to approve, then your link is made.')),
+          h('p', { class: 'setting-desc' }, 'Music Box only ever writes into its own app folder, in “Music Box pictures”.'),
+          h('div', { class: 'actions' },
+            h('button', { class: 'btn', onclick: () => { pics.checked = false; go.click(); } }, 'Share without pictures'),
+            h('button', {
+              class: 'btn primary',
+              onclick: () => {
+                sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending()));
+                providers.dropbox.connect({ sharing: true, pictures: true, back: location.hash });
+              },
+            }, 'Continue to Dropbox →'))));
+      } else if (err.code === 'dropbox-scope') {
         status.replaceChildren(h('div', { class: 'callout' },
           h('strong', {}, 'One-time step: let Dropbox make share links'),
           h('ol', { class: 'steps' },
@@ -731,8 +771,8 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true }
           h('button', {
             class: 'btn primary',
             onclick: () => {
-              sessionStorage.setItem(PENDING_SHARE, JSON.stringify({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked }));
-              providers.dropbox.connect({ sharing: true, back: location.hash });
+              sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending()));
+              providers.dropbox.connect({ sharing: true, pictures: pics.checked && pictureCount > 0, back: location.hash });
             },
           }, 'Continue to Dropbox →')));
         go.hidden = true; // the only way forward is approving in Dropbox
@@ -869,10 +909,22 @@ async function recordView(payload, stale) {
       h('div', { class: 'actions' },
         h('button', { class: 'btn primary', onclick: () => play(false) }, iconSpan('play'), 'Play'),
         h('button', { class: 'btn', onclick: () => play(true) }, iconSpan('shuffle'), 'Shuffle'),
+        rec.linkPictures?.length && h('button', {
+          class: 'btn',
+          title: 'These pictures load from other websites, which will see your visit',
+          onclick: (e) => {
+            rec.skin.pictures = [...rec.skin.pictures, ...rec.linkPictures].slice(0, 4);
+            rec.linkPictures = [];
+            applySkin(rec.skin);
+            e.currentTarget.remove();
+          },
+        }, `Show pictures from ${[...new Set(rec.linkPictures.map((p) => new URL(p.src).hostname))].join(', ')}`),
         rec.skin && h('button', {
           class: 'btn',
-          onclick: () => {
-            const keep = { ...rec.skin, id: 'custom', inspiredBy: [] };
+          onclick: async () => {
+            // Keep a copy of the record's pictures on this device, so the skin doesn't depend on the sender.
+            const pictures = await Promise.all((rec.skin.pictures || []).map(adoptPicture));
+            const keep = { ...rec.skin, id: 'custom', inspiredBy: [], pictures: pictures.filter(Boolean) };
             store.setSetting('customSkin', keep);
             recordSkin = null;
             useSkin(keep);
@@ -1305,6 +1357,7 @@ async function popOut() {
   }
   popWin = win;
   popDoc = win.document;
+  setPictureDoc(popDoc);
   popDoc.title = 'Music Box';
   // Same styles as the page: copy our stylesheet's rules in (a <link> isn't reliably applied in a
   // picture-in-picture window), plus the skin's variables and layout attributes.
@@ -1353,6 +1406,7 @@ function popIn() {
   const list = popDoc.querySelector('.playlist');
   const win = popWin;
   popWin = null;
+  if (popDoc) setPictureDoc(popDoc, false);
   popDoc = null;
   rootSync?.disconnect();
   setOtherDocument(null);

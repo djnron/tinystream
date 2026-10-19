@@ -105,6 +105,26 @@ async function authedFetch(url, { signal } = {}) {
   return res;
 }
 
+const PICTURE_FOLDER = 'mb.gdrive.pictureFolder';
+
+/** The Drive folder for shared skin pictures, made the first time it's needed. */
+async function pictureFolder() {
+  const known = localStorage.getItem(PICTURE_FOLDER);
+  if (known) {
+    const res = await authedRequest(`${API}/files/${encodeURIComponent(known)}?fields=id,trashed`);
+    if (res.ok && !(await res.json()).trashed) return known;
+  }
+  const res = await authedRequest(`${API}/files?fields=id`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Music Box pictures', mimeType: 'application/vnd.google-apps.folder' }),
+  });
+  if (!res.ok) throw new Error(`Google Drive couldn't make a folder for pictures (${res.status})`);
+  const { id } = await res.json();
+  localStorage.setItem(PICTURE_FOLDER, id);
+  return id;
+}
+
 // ---------- the library of picked songs ----------
 
 function readLibrary() {
@@ -246,6 +266,24 @@ export const gdrive = {
     }
     const meta = await (await authedRequest(`${API}/files/${encodeURIComponent(fileId)}?fields=resourceKey&supportsAllDrives=true`)).json().catch(() => ({}));
     return meta.resourceKey || null;
+  },
+
+  /**
+   * Saves a skin picture to the user's Drive (in a "Music Box pictures" folder the app makes) and
+   * shares it by link, for shared records. drive.file allows this: the app only sees files it made.
+   * Returns { ref, key } (the file id and its resource key, if any).
+   */
+  async uploadPicture(blob, name) {
+    const folder = await pictureFolder();
+    const meta = { name, mimeType: blob.type || 'image/webp', parents: [folder] };
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+    form.append('file', blob);
+    const res = await authedRequest('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form });
+    if (res.status === 404) { localStorage.removeItem(PICTURE_FOLDER); }
+    if (!res.ok) throw new Error(`Google Drive couldn't save a picture (${res.status})`);
+    const { id } = await res.json();
+    return { ref: id, key: await this.shareFile(id) };
   },
 
   /** Turns "anyone with the link" back off for one file. */

@@ -937,6 +937,12 @@ async function recordView(payload, stale) {
     applySkin(rec.skin);
     requestAnimationFrame(() => paintSkinArt(rec.skin));
   }
+  // The record's songs go straight into the player, ready to play (browsers need one tap to start
+  // sound). Music already playing, or paused partway through, is left alone.
+  if (rec.tracks.length && !player.busy && player.queue[0]?.id !== rec.tracks[0].id) {
+    currentSource = { pid: 'record', id: payload, name: rec.title };
+    player.cueList(rec.tracks, 0);
+  }
   const play = (shuffle) => {
     currentSource = { pid: 'record', id: payload, name: rec.title };
     player.playList(rec.tracks, 0, { shuffle });

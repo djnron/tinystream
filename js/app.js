@@ -8,6 +8,7 @@ import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './
 import { lcdDigits, lcdTime } from './lcd.js';
 import { paint as paintSkinArt, repaint as repaintSkinArt, setOtherDocument } from './skin-art.js';
 import { generateSkin, museumUrl } from './skin-generator.js';
+import { makeCover } from './cover.js';
 import { adoptPicture, setPictureDoc } from './pictures.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
 import { studioView } from './studio.js';
@@ -743,6 +744,10 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
         noDownload: lock.checked,
         withPictures: pics.checked,
         source: { pid, id: folderId },
+        makeCover: () => {
+          status.textContent = 'Making the link preview…';
+          return makeCover({ deck: (popDoc || document).querySelector('.deck'), title: titleInput.value.trim() || name, count: Math.min(tracks.length, 300), skinName: skin.name });
+        },
         onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} / ${total}`; },
       });
       showShareResult(body, url, truncated);
@@ -829,7 +834,7 @@ function sharePlaying() {
   if (src.pid === 'record') {
     const body = h('div', { class: 'modal-body' });
     modal(body);
-    return showShareResult(body, recordUrl(src.id), false, { title: src.name, forwarding: true });
+    return showShareResult(body, recordUrl(src.id, src.card), false, { title: src.name, forwarding: true });
   }
   if (src.pid !== 'gdrive' && src.pid !== 'dropbox') {
     return toast('Songs from this device can’t be shared by link. Google Drive and Dropbox songs can.');
@@ -940,11 +945,11 @@ async function recordView(payload, stale) {
   // The record's songs go straight into the player, ready to play (browsers need one tap to start
   // sound). Music already playing, or paused partway through, is left alone.
   if (rec.tracks.length && !player.busy && player.queue[0]?.id !== rec.tracks[0].id) {
-    currentSource = { pid: 'record', id: payload, name: rec.title };
+    currentSource = { pid: 'record', id: payload, name: rec.title, card: new URLSearchParams(location.search).get('c') || '' };
     player.cueList(rec.tracks, 0);
   }
   const play = (shuffle) => {
-    currentSource = { pid: 'record', id: payload, name: rec.title };
+    currentSource = { pid: 'record', id: payload, name: rec.title, card: new URLSearchParams(location.search).get('c') || '' };
     player.playList(rec.tracks, 0, { shuffle });
   };
   const dl = (track) => {

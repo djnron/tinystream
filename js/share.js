@@ -11,7 +11,7 @@
 import { CONFIG } from '../config.js';
 import { pictureBlob, setRemoteLoader, validatePicture } from './pictures.js';
 import { getProvider } from './providers/index.js';
-import { validateArt, validateFonts, validateLayout, validateTokens } from './skins.js';
+import { solidColor, TOKENS, validateArt, validateFonts, validateLayout, validateTokens } from './skins.js';
 import { stripExt, withAudioType } from './util.js';
 
 const RECORDS_KEY = 'mb.records';
@@ -43,8 +43,34 @@ async function decode(text) {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-export function recordUrl(payload) {
+/**
+ * Link previews (a picture and title when the link is pasted into a chat) need the small server
+ * functions in api/, which run on Vercel. Elsewhere (GitHub Pages) links are plain.
+ */
+export const previewsAvailable = () => location.hostname.endsWith('.vercel.app') || Boolean(CONFIG.linkPreviews);
+
+export function recordUrl(payload, card = '') {
+  if (card && previewsAvailable()) return `${location.origin}/r?c=${card}#/r/${payload}`;
   return `${location.origin}${location.pathname}#/r/${payload}`;
+}
+
+/** The card for link previews: title, count, skin colors and the cover picture (if one was saved). */
+async function makeCard({ title, count, skin, cover }) {
+  const t = { ...TOKENS, ...(skin?.tokens || {}) };
+  const hex = (v) => { const c = solidColor(v); return /^#[0-9a-f]{3,8}$/i.test(c) ? c : undefined; };
+  return encode({
+    t: title.slice(0, 80),
+    n: count,
+    s: skin?.name || '',
+    r: parseInt(t.radius, 10) || 0,
+    c: {
+      bg: hex(t.bg), text: hex(t.text), muted: hex(t.muted), accent: hex(t.accent),
+      deck: hex(t['deck-bg']), title: hex(t['titlebar-bg']), titleText: hex(t['titlebar-text']),
+      btn: hex(t['btn-face']), btnText: hex(t['btn-text']), lcd: hex(t['lcd-bg']), lcdText: hex(t['lcd-text']),
+      list: hex(t['list-bg']), listText: hex(t['list-text']),
+    },
+    i: cover || undefined,
+  });
 }
 
 // ---------- making a record ----------
@@ -64,7 +90,7 @@ function dropboxPath(url) {
  * Shares the tracks and returns { url, record }. `onProgress(done, total)` reports sharing progress.
  * Throws { code: 'dropbox-scope' } when Dropbox needs the extra sharing permission first.
  */
-export async function createRecord({ title, tracks, skin, noDownload, withPictures = true, source = null, onProgress }) {
+export async function createRecord({ title, tracks, skin, noDownload, withPictures = true, source = null, makeCover = null, onProgress }) {
   const list = tracks.slice(0, MAX_TRACKS);
   const items = [];
   // Pictures first: if Dropbox needs a permission for them, nothing has been shared yet.
@@ -93,7 +119,19 @@ export async function createRecord({ title, tracks, skin, noDownload, withPictur
     } : null,
     r: items.map((x) => [x.src, x.ref, x.name, x.size || 0, x.key || 0]),
   });
-  const url = recordUrl(payload);
+  // The link preview picture: a snapshot of the player, saved next to the songs. Optional: if it
+  // can't be made or saved, previews fall back to a drawn version of the player.
+  let cover = null;
+  if (makeCover && previewsAvailable()) {
+    try {
+      cover = await shareCover(await makeCover(), list[0]?.provider);
+      if (cover) pics.items.push(cover.item);
+    } catch (err) {
+      console.warn('No link preview picture', err);
+    }
+  }
+  const card = previewsAvailable() ? await makeCard({ title, count: items.length, skin, cover: cover?.ref }) : '';
+  const url = recordUrl(payload, card);
   const record = {
     id: `r${Date.now().toString(36)}`,
     title,
@@ -170,6 +208,23 @@ async function sharePictures(skin, songsProvider) {
     }
   }
   return { rows, items };
+}
+
+/** Saves and shares the link preview picture where the songs are, if that needs no new permission. */
+async function shareCover(blob, songsProvider) {
+  const drive = getProvider('gdrive');
+  const dropbox = getProvider('dropbox');
+  const name = `cover-${Date.now().toString(36)}.jpg`;
+  if (songsProvider === 'dropbox' && dropbox.canUploadPictures()) {
+    const up = await dropbox.uploadPicture(blob, name);
+    const ref = dropboxPath(up.url);
+    return { ref: ['d', ref], item: { src: 'd', ref, url: up.url } };
+  }
+  if (drive?.isConnected()) {
+    const up = await drive.uploadPicture(blob, name);
+    return { ref: ['g', up.ref, up.key || undefined], item: { src: 'g', ref: up.ref } };
+  }
+  return null; // Dropbox without the save permission: previews use the drawn player instead
 }
 
 /** Fetches a record's picture ("rec:g:<id>[:<key>]" or "rec:d:<path>") without any account. */

@@ -1,0 +1,9 @@
+{
+  "name": "tinystream",
+  "private": true,
+  "type": "module",
+  "description": "Music Box. The app is static files; api/ holds two small Vercel functions for shared-record link previews.",
+  "dependencies": {
+    "@vercel/og": "0.11.1"
+  }
+}

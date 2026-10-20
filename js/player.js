@@ -63,6 +63,25 @@ export class Player extends EventTarget {
     this.#playAt(shuffle ? 0 : startIndex);
   }
 
+  /** Replace the queue without playing: the playlist fills and Play starts at `startIndex`. */
+  cueList(tracks, startIndex = 0) {
+    if (!tracks.length) return;
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load(); // back to 0:00 with nothing loaded
+    this.queue = tracks.slice();
+    this.order = this.#makeOrder(startIndex);
+    this.pos = store.settings.shuffle ? 0 : startIndex;
+    this.error = null;
+    this.#clearPrefetch();
+    this.#emit();
+  }
+
+  /** True when something is playing, or paused partway through a song. */
+  get busy() {
+    return this.playing || (Boolean(this.current) && this.audio.currentTime > 0);
+  }
+
   toggle() {
     if (!this.current) return;
     if (this.audio.paused) {

@@ -344,6 +344,12 @@ async function browseView(pid, folderId, name, stale) {
   if (stale()) return;
 
   const { folders, tracks } = listing;
+  // Opening a folder fills the player's playlist, ready to play, unless music is playing or
+  // paused partway through a song (that's left alone).
+  if (tracks.length && !player.busy && player.queue[0]?.id !== tracks[0].id) {
+    currentSource = { pid, id: folderId, name };
+    player.cueList(tracks, 0);
+  }
   const pinned = isPinned(pid, folderId);
   // Source-specific buttons, e.g. Google Drive's "Add music" (it only sees songs you pick).
   const extra = (p.actions?.(folderId) || []).map((a) => h('button', {

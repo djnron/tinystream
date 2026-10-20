@@ -368,6 +368,7 @@ async function browseView(pid, folderId, name, stale) {
         else if (result) render();
       } catch (err) {
         if (err instanceof AuthRequiredError) toast(err.message || `Sign in to ${p.label} again`);
+        else if (err.code === 'dropbox-scope') dropboxPickHelp();
         else toast(err.message);
       }
     },
@@ -799,6 +800,24 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
 }
 
 const DROPBOX_CONSOLE = 'https://www.dropbox.com/developers/apps';
+
+/** One-time setup for picking from anywhere in Dropbox: the sharing permission, and the Chooser domain. */
+function dropboxPickHelp() {
+  const dlg = modal(h('div', { class: 'modal-body' },
+    h('h2', {}, 'One-time step: let Music Box use Dropbox’s picker'),
+    h('p', { class: 'setting-desc' }, 'Music Box only sees its own app folder. To play music from anywhere else, you pick it in '
+      + 'Dropbox’s own picker, and Music Box plays it through the link Dropbox makes for what you pick.'),
+    h('ol', { class: 'steps' },
+      h('li', {}, 'Open the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'), ' and click your app.'),
+      h('li', {}, 'On the ', h('strong', {}, 'Permissions'), ' tab, tick ', h('strong', {}, 'sharing.read'), ' and ',
+        h('strong', {}, 'sharing.write'), ', then ', h('strong', {}, 'Submit'), '.'),
+      h('li', {}, 'On the ', h('strong', {}, 'Settings'), ' tab, under ', h('strong', {}, 'Chooser / Saver / Embedder domains'),
+        ', add ', h('code', {}, location.hostname), '.'),
+      h('li', {}, 'Come back and press the button below, approve in Dropbox, then press “Add music from Dropbox” again.')),
+    h('div', { class: 'actions' },
+      h('button', { class: 'btn', onclick: () => dlg.close() }, 'Not now'),
+      h('button', { class: 'btn primary', onclick: () => providers.dropbox.connect({ sharing: true, back: location.hash }) }, 'Continue to Dropbox →'))));
+}
 
 /** Explains the one-time Dropbox setting for sharing, with what Dropbox said if it refused. */
 function dropboxSharingHelp(detail, pending) {

@@ -17,6 +17,52 @@ const PICTURE_SCOPES = 'files.content.write';
 
 const redirectUri = () => location.origin + location.pathname;
 
+// ---------- picked from anywhere (Dropbox Chooser) ----------
+//
+// The app itself only sees its app folder. To play music from elsewhere in Dropbox, you pick it in
+// Dropbox's own Chooser. Dropbox hands back a share link for each pick; the app keeps those links
+// in this browser only and reads the music through them (folders via the API, so subfolders work).
+
+const PICKED_KEY = 'mb.dropbox.picked';
+const CHOOSER = 'https://www.dropbox.com/static/api/2/dropins.js';
+const AUDIO_EXTS = ['.mp3', '.m4a', '.aac', '.flac', '.wav', '.ogg', '.oga', '.opus', '.webm', '.aif', '.aiff', '.alac'];
+
+function readPicked() {
+  try {
+    const list = JSON.parse(localStorage.getItem(PICKED_KEY));
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+const writePicked = (list) => localStorage.setItem(PICKED_KEY, JSON.stringify(list));
+
+/** Loads Dropbox's Chooser script ahead of time: it has to open straight from a click. */
+let chooserLoading = null;
+function loadChooser() {
+  if (window.Dropbox?.choose) return Promise.resolve();
+  chooserLoading ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = CHOOSER;
+    s.id = 'dropboxjs';
+    s.dataset.appKey = CONFIG.dropboxAppKey;
+    s.onload = resolve;
+    s.onerror = () => { chooserLoading = null; reject(new Error('Couldn’t load the Dropbox chooser. Check your connection and try again.')); };
+    document.head.append(s);
+  });
+  return chooserLoading;
+}
+
+// Ids for picked things: "pick:<pickId>:<path inside the pick>" (the path is "" for the pick itself).
+const pickId = (id, path = '') => `pick:${id}:${path}`;
+function parsePick(id) {
+  const m = /^pick:([\w-]+):(.*)$/.exec(id || '');
+  if (!m) return null;
+  const pick = readPicked().find((x) => x.id === m[1]);
+  return pick ? { pick, path: m[2] } : null;
+}
+
 function readToken() {
   try {
     return JSON.parse(localStorage.getItem(TOKEN_KEY));
@@ -126,6 +172,64 @@ function toTrack(e) {
 }
 
 const isTrack = (e) => e['.tag'] === 'file' && isAudio(e.name);
+
+function pickTrack(pick, name, path, folder, size) {
+  return {
+    id: `${ID}:${pickId(pick.id, path)}`,
+    provider: ID,
+    fileId: pickId(pick.id, path),
+    fileName: name,
+    name: stripExt(name),
+    folder,
+    size: size || 0,
+  };
+}
+
+/** Lists one folder inside a picked share link ("" is the picked folder itself). */
+async function listPickEntries(pick, path) {
+  const entries = [];
+  let data = await rpc('files/list_folder', { path, shared_link: { url: pick.url } });
+  entries.push(...data.entries);
+  while (data.has_more) {
+    data = await rpc('files/list_folder/continue', { cursor: data.cursor });
+    entries.push(...data.entries);
+  }
+  return entries;
+}
+
+async function listPick(folderId, folderName) {
+  const at = parsePick(folderId);
+  if (!at) throw new Error('This folder was removed from Music Box');
+  const { pick, path } = at;
+  const entries = await listPickEntries(pick, path);
+  const folders = entries.filter((e) => e['.tag'] === 'folder').sort((a, b) => naturalSort(a.name, b.name))
+    .map((e) => ({ id: pickId(pick.id, `${path}/${e.name}`), name: e.name }));
+  const tracks = entries.filter(isTrack).sort((a, b) => naturalSort(a.name, b.name))
+    .map((e) => pickTrack(pick, e.name, `${path}/${e.name}`, folderName || pick.name, e.size));
+  return { folders, tracks };
+}
+
+/** Shared links can only be listed one level at a time, so walk down (a few levels at most). */
+async function listPickRecursive(folderId, folderName, limit, onProgress) {
+  const at = parsePick(folderId);
+  if (!at) throw new Error('This folder was removed from Music Box');
+  const out = [];
+  const walk = async (path, name, depth) => {
+    if (out.length >= limit) return;
+    const entries = await listPickEntries(at.pick, path);
+    for (const e of entries.filter(isTrack).sort((a, b) => naturalSort(a.name, b.name))) {
+      if (out.length >= limit) break;
+      out.push(pickTrack(at.pick, e.name, `${path}/${e.name}`, name, e.size));
+    }
+    onProgress?.(out.length);
+    if (depth >= 4) return;
+    for (const f of entries.filter((e) => e['.tag'] === 'folder').sort((a, b) => naturalSort(a.name, b.name))) {
+      await walk(`${path}/${f.name}`, f.name, depth + 1);
+    }
+  };
+  await walk(at.path, folderName || at.pick.name, 0);
+  return out;
+}
 const byPath = (a, b) => naturalSort(a.path_display, b.path_display);
 
 export const dropbox = {
@@ -198,6 +302,14 @@ export const dropbox = {
 
   /** Creates (or reuses) a public share link for one file and returns its URL. */
   async shareFile(fileId) {
+    if (fileId.startsWith('pick:')) {
+      // Picked songs already have the Chooser's link. Songs inside a picked folder don't have one of
+      // their own, and the app can't make one (it can't see outside its folder).
+      const at = parsePick(fileId);
+      if (at && at.path === '') return at.pick.url;
+      throw new Error('Songs inside a folder picked from Dropbox can’t go in a record yet. Pick the songs themselves '
+        + '(“Add music from Dropbox”, then select the songs), or put the folder in the app folder.');
+    }
     if (!this.canShare()) throw Object.assign(new Error('Dropbox needs permission to make share links'), { code: 'dropbox-scope' });
     const res = await rawRpc('sharing/create_shared_link_with_settings', { path: fileId });
     if (res.ok) return res.data.url;
@@ -216,6 +328,8 @@ export const dropbox = {
   },
 
   async unshareFile(url) {
+    if (readPicked().some((p) => p.url === url)) return; // the Chooser's link: Music Box plays through it
+
     const res = await rawRpc('sharing/revoke_shared_link', { url });
     if (!res.ok && res.data?.error?.['.tag'] !== 'shared_link_not_found') {
       throw new Error(`Dropbox error ${res.data?.error_summary || res.status}`);
@@ -224,8 +338,61 @@ export const dropbox = {
 
   emptyHint(folderId) {
     return folderId === 'root'
-      ? 'Music Box can only see its own app folder. Put music in Dropbox → Apps → (your Dropbox app’s name), then come back.'
+      ? 'Press “Add music from Dropbox” to pick songs or folders from anywhere in your Dropbox. (Music in Dropbox → Apps → your app’s folder shows here too.)'
       : 'No folders or audio files in this folder.';
+  },
+
+  /** Extra buttons on the Dropbox browse screen. */
+  actions(folderId) {
+    if (!this.isConnected()) return [];
+    loadChooser().catch(() => {}); // ready before the click
+    if (folderId === 'root') return [{ label: '＋ Add music from Dropbox', primary: true, run: () => this.addMusic() }];
+    const at = parsePick(folderId);
+    if (at && at.path === '') return [{ label: 'Remove from Music Box', run: () => this.removePick(at.pick.id) }];
+    return [];
+  },
+
+  /** True once Dropbox lets the app read the share links the Chooser makes. */
+  canReadPicks() {
+    return /\bsharing\.read\b/.test(readToken()?.scope || '');
+  },
+
+  /**
+   * Opens Dropbox's Chooser to pick songs or folders from anywhere in Dropbox. Reading them needs
+   * the sharing permission (the same one sharing records uses), asked for once.
+   */
+  async addMusic() {
+    if (!this.canReadPicks()) {
+      throw Object.assign(new Error('Dropbox needs one more permission to play music picked from anywhere'), { code: 'dropbox-scope' });
+    }
+    if (!window.Dropbox?.choose) await loadChooser(); // normally already loaded
+    const files = await new Promise((resolve) => {
+      window.Dropbox.choose({
+        success: resolve,
+        cancel: () => resolve([]),
+        linkType: 'preview', // a lasting link (direct links stop working after 4 hours)
+        multiselect: true,
+        folderselect: true,
+        extensions: AUDIO_EXTS,
+      });
+    });
+    if (!files.length) return null;
+    const list = readPicked();
+    const have = new Set(list.map((x) => x.url));
+    let added = 0;
+    for (const f of files) {
+      if (!/^https:\/\/www\.dropbox\.com\//.test(f.link || '') || have.has(f.link)) continue;
+      list.push({ id: `p${Date.now().toString(36)}${added}`, name: String(f.name || 'Dropbox').slice(0, 200), url: f.link, isDir: Boolean(f.isDir), size: Number(f.bytes) || 0 });
+      have.add(f.link);
+      added++;
+    }
+    writePicked(list);
+    return added ? `Added ${added} from Dropbox` : 'Those are already in Music Box';
+  },
+
+  removePick(id) {
+    writePicked(readPicked().filter((x) => x.id !== id));
+    return { goUp: true, message: 'Removed from Music Box (it’s still in your Dropbox)' };
   },
 
   /** Returns true if this page load was the return from Dropbox's consent screen. */
@@ -258,6 +425,7 @@ export const dropbox = {
   },
 
   async list(folderId, folderName) {
+    if (folderId.startsWith('pick:')) return listPick(folderId, folderName);
     const path = folderId === 'root' ? '' : folderId;
     const entries = await listEntries(path, false);
     const folders = entries
@@ -265,10 +433,18 @@ export const dropbox = {
       .sort((a, b) => naturalSort(a.name, b.name))
       .map((e) => ({ id: e.path_lower, name: e.name }));
     const tracks = entries.filter(isTrack).sort(byPath).map((e) => ({ ...toTrack(e), folder: folderName || this.rootName }));
+    if (folderId === 'root') {
+      // Things picked from elsewhere in Dropbox sit alongside the app folder's own.
+      for (const p of readPicked()) {
+        if (p.isDir) folders.push({ id: pickId(p.id), name: `${p.name} ↗` });
+        else tracks.push(pickTrack(p, p.name, '', folderName || this.rootName, p.size));
+      }
+    }
     return { folders, tracks };
   },
 
-  async listRecursive(folderId, _folderName, { limit = 5000, onProgress } = {}) {
+  async listRecursive(folderId, folderName, { limit = 5000, onProgress } = {}) {
+    if (folderId.startsWith('pick:')) return listPickRecursive(folderId, folderName, limit, onProgress);
     const path = folderId === 'root' ? '' : folderId;
     const entries = await listEntries(path, true, limit * 2);
     const tracks = entries.filter(isTrack).sort(byPath).map(toTrack).slice(0, limit);
@@ -277,6 +453,17 @@ export const dropbox = {
   },
 
   async fetchBlob(track, { signal } = {}) {
+    if (track.fileId.startsWith('pick:')) {
+      const at = parsePick(track.fileId);
+      if (!at) throw new Error('This song was removed from Music Box');
+      const arg = at.path ? { url: at.pick.url, path: at.path } : { url: at.pick.url };
+      const res = await call('https://content.dropboxapi.com/2/sharing/get_shared_link_file', {
+        method: 'POST',
+        headers: { 'Dropbox-API-Arg': headerJson(arg) },
+        signal,
+      });
+      return withAudioType(await res.blob(), track.fileName);
+    }
     const res = await call('https://content.dropboxapi.com/2/files/download', {
       method: 'POST',
       headers: { 'Dropbox-API-Arg': headerJson({ path: track.fileId }) },

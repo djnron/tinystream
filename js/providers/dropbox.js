@@ -436,7 +436,7 @@ export const dropbox = {
     if (folderId === 'root') {
       // Things picked from elsewhere in Dropbox sit alongside the app folder's own.
       for (const p of readPicked()) {
-        if (p.isDir) folders.push({ id: pickId(p.id), name: `${p.name} ↗` });
+        if (p.isDir) folders.push({ id: pickId(p.id), name: p.name, sub: 'Picked from your Dropbox' });
         else tracks.push(pickTrack(p, p.name, '', folderName || this.rootName, p.size));
       }
     }

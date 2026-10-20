@@ -150,7 +150,7 @@ function folderList(pid, folders) {
     h('li', { class: 'row' },
       h('a', { class: 'row-main', href: hashFor.folder(pid, f.id, f.name) },
         iconSpan('folder', 'ico folder'),
-        h('span', { class: 'row-text' }, h('span', { class: 'row-title' }, f.name))))));
+        h('span', { class: 'row-text' }, h('span', { class: 'row-title' }, f.name), f.sub && h('span', { class: 'row-sub' }, f.sub))))));
 }
 
 function message(title, body, ...actions) {
@@ -701,6 +701,16 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
   }
   t.remove();
   if (!tracks.length) return toast('There are no songs here to share');
+  // Songs inside a folder picked with Dropbox's picker have no share link of their own.
+  if (tracks.some((x) => /^pick:[^:]+:./.test(x.fileId))) {
+    return modal(h('div', { class: 'modal-body' },
+      h('h2', {}, 'This folder can’t be shared as a record yet'),
+      h('p', {}, 'It was picked with Dropbox’s picker, which gives Music Box one link for the whole folder but none for the songs inside it, '
+        + 'and Music Box can’t make them: it can only reach its own app folder.'),
+      h('p', { class: 'setting-desc' }, 'To share these songs: pick the songs themselves with “Add music from Dropbox”, or copy the folder into '
+        + 'Dropbox → Apps → (your app’s folder).'),
+      h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: (e) => e.target.closest('dialog').close() }, 'OK'))));
+  }
   const skin = currentSkin();
   const where = pid === 'gdrive' ? 'Google Drive' : 'Dropbox';
   const titleInput = h('input', { type: 'text', value: title || name, maxlength: 80, 'aria-label': 'Record title' });

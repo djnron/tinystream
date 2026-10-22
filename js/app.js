@@ -2,7 +2,7 @@ import * as downloads from './downloads.js';
 import { icons } from './icons.js';
 import { Player } from './player.js';
 import { getProvider, providers, registerHidden } from './providers/index.js';
-import { createRecord, downloadUrl, myRecords, openRecord, recordUrl, sharedSource, stopSharing } from './share.js';
+import { createRecord, downloadUrl, moveRecordSources, myRecords, openRecord, recordUrl, sharedSource, stopSharing } from './share.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
@@ -1682,6 +1682,37 @@ window.addEventListener('online', updateOnline);
 window.addEventListener('offline', updateOnline);
 window.addEventListener('hashchange', render);
 
+/**
+ * Music Box moved to a new Dropbox app (read-only access to the whole Dropbox, instead of one app
+ * folder). Sign-ins from the old app don't carry over, so ask for one reconnect; afterwards, point
+ * pins and records' folders at where the old app folder's contents now appear (Apps/<old app>/).
+ */
+async function switchDropboxApp() {
+  const { dropbox } = providers;
+  if (dropbox.needsReconnect()) {
+    toast('Dropbox: Music Box now has read-only access to your whole Dropbox. Reconnect once to keep playing.', {
+      timeout: 0,
+      action: { label: 'Reconnect', run: () => dropbox.reconnectFromAppFolder() },
+    });
+    return;
+  }
+  if (!dropbox.isConnected()) return;
+  const old = (id) => !String(id).startsWith('pick:'); // picks keep working as they are
+  const pinIds = pins().filter((f) => f.pid === 'dropbox' && old(f.id)).map((f) => f.id);
+  const recIds = myRecords().filter((r) => r.source?.pid === 'dropbox' && old(r.source.id)).map((r) => r.source.id);
+  try {
+    const moved = await dropbox.moveFromAppFolder([...new Set([...pinIds, ...recIds])]);
+    if (!moved.size) return;
+    store.setSetting('pins', pins().map((f) => (f.pid === 'dropbox' && moved.has(f.id) ? { ...f, id: moved.get(f.id) } : f)));
+    moveRecordSources('dropbox', moved);
+    toast(moved.size === 1 ? 'Updated 1 Dropbox folder to its new place' : `Updated ${moved.size} Dropbox folders to their new place`);
+    updatePlayerUi();
+    render();
+  } catch (err) {
+    console.warn('Dropbox folder move', err);
+  }
+}
+
 async function start() {
   $('#back').innerHTML = icons.back;
   $('#settings-link').innerHTML = icons.settings;
@@ -1734,6 +1765,7 @@ async function start() {
   } catch (err) {
     toast(err.message, { timeout: 8000 });
   }
+  switchDropboxApp();
   updateOnline();
   updatePlayerUi();
   syncViz();

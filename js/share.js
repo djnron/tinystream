@@ -273,6 +273,11 @@ export async function stopSharing(id) {
   if (failures.length) throw new Error(`${failures.length} song${failures.length === 1 ? '' : 's'} could not be unshared: ${failures[0].message}`);
 }
 
+/** Points records made from folders that moved (Dropbox app switch) at the folders' new ids. */
+export function moveRecordSources(pid, moved) {
+  saveRecords(myRecords().map((r) => (r.source?.pid === pid && moved.has(r.source.id) ? { ...r, source: { pid, id: moved.get(r.source.id) } } : r)));
+}
+
 export function myRecords() {
   try {
     return JSON.parse(localStorage.getItem(RECORDS_KEY)) || [];

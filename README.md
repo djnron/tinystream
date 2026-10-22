@@ -30,7 +30,8 @@ from scratch as plain HTML/CSS/JavaScript with no build step and no dependencies
   plays offline later. Turning it off stops downloads right away and asks whether to delete what's already
   saved.
 - **Minimal, read-only access.**
-  - **Dropbox:** created as an "App folder" app, it only sees `Dropbox/Apps/<app name>/`, read-only.
+  - **Dropbox:** read-only (it can browse and play, never change or delete). No share links are made just
+    to listen.
   - **Google Drive:** it only sees songs you pick in Google's picker (`drive.file`).
   - **Either way:** the app can't change or delete anything.
 - **No server.** The browser talks directly to Google and Dropbox. Sign-in tokens stay in your browser.
@@ -70,25 +71,29 @@ own they can't open anyone's files. Every visitor signs in to their *own* accoun
 
 Both sources use the **narrowest access** each service offers:
 
-- **Dropbox:** only one app folder.
+- **Dropbox:** read-only access (it can see your Dropbox, but never change it).
 - **Google Drive:** only the songs you pick.
 
 Use your real addresses below. This repo is served at `https://tinystream.vercel.app/` and
 `https://djnron.github.io/tinystream/`. Add `http://localhost:8080` too if you run it locally.
 
-### Dropbox (App folder: the app only sees `Dropbox/Apps/<app name>/`)
+### Dropbox (read-only, whole Dropbox)
 
 1. Go to the [Dropbox App Console](https://www.dropbox.com/developers/apps) → **Create app**.
-2. Choose **Scoped access**, then **App folder**, and give it a name, e.g. `tinystream`. This can't be
-   changed later; if you already made a "Full Dropbox" app, create a new one.
-3. On the **Permissions** tab, tick `files.metadata.read` and `files.content.read`, then **Submit**.
+2. Choose **Scoped access**, then **Full Dropbox**, and give it a name, e.g. `tinystream2`.
+3. On the **Permissions** tab, tick `files.metadata.read` and `files.content.read` (plus `sharing.read`
+   and `sharing.write` if you'll share records), then **Submit**. Leave every "write" permission off,
+   except `files.content.write` if you want records to carry your skin's pictures.
 4. On the **Settings** tab:
    - **OAuth 2 → Redirect URIs**: add each address exactly, including the trailing slash:
      `https://tinystream.vercel.app/` and `https://djnron.github.io/tinystream/`.
    - **Allow public clients (Implicit Grant & PKCE)**: **Allow**.
+   - **Development users → Enable additional users**, so friends can connect too.
 5. Copy the **App key** into `dropboxAppKey` in `config.js`.
-6. After you connect once, a folder appears at **Dropbox → Apps → tinystream** (named after your app).
-   Put your music there, and subfolders work. The rest of your Dropbox stays invisible to the app.
+6. Connect, and **Browse** shows your whole Dropbox. Music Box can only read it.
+
+(Earlier versions used an "App folder" app. Switching asks everyone to reconnect once; pinned folders
+from the old app folder are found again under **Apps → (old app name)** automatically.)
 
 > Keep the app in **development** status and don't "enable additional users" if it's just for you.
 

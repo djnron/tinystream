@@ -1,7 +1,11 @@
 // Dropbox source, using OAuth 2 with PKCE (no server, no client secret) and the Dropbox HTTP API.
-// Requested scopes are read-only: files.metadata.read and files.content.read.
-// Create the Dropbox app with "App folder" access (see README): it can then only see
-// Dropbox/Apps/<your app name>/, and paths here are relative to that folder.
+// The Dropbox app has "Full Dropbox" access with read-only scopes (files.metadata.read and
+// files.content.read): Music Box can browse and play everything, but never change or delete
+// anything, and no share links are made just to listen. Sharing scopes are asked for only when you
+// first share a record. The sign-in lives in this browser only.
+//
+// Earlier versions used an "App folder" app. Its sign-in doesn't work with the new app, so people
+// are asked to reconnect once, and paths saved from it (pins) are moved under Apps/<old app>/.
 
 import { CONFIG } from '../../config.js';
 import { AuthRequiredError, base64Url, isAudio, naturalSort, randomString, stripExt, withAudioType } from '../util.js';
@@ -63,12 +67,22 @@ function parsePick(id) {
   return pick ? { pick, path: m[2] } : null;
 }
 
+const MIGRATE_KEY = 'mb.dropbox.fromAppFolder'; // set while a reconnect from the old app is pending
+
+/** The sign-in, if it belongs to the current Dropbox app (a sign-in from the old app is set aside). */
 function readToken() {
+  let t;
   try {
-    return JSON.parse(localStorage.getItem(TOKEN_KEY));
+    t = JSON.parse(localStorage.getItem(TOKEN_KEY));
   } catch {
     return null;
   }
+  if (t && t.app !== CONFIG.dropboxAppKey) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.setItem(MIGRATE_KEY, JSON.stringify({ sharing: /sharing\.write/.test(t.scope || '') }));
+    return null;
+  }
+  return t;
 }
 
 function storeToken(resp, refreshToken) {
@@ -77,6 +91,7 @@ function storeToken(resp, refreshToken) {
     expires_at: Date.now() + (Number(resp.expires_in) - 60) * 1000,
     refresh_token: resp.refresh_token || refreshToken,
     scope: resp.scope || readToken()?.scope || SCOPES,
+    app: CONFIG.dropboxAppKey, // which Dropbox app this sign-in belongs to
   };
   localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
   return token;
@@ -236,7 +251,7 @@ export const dropbox = {
   id: ID,
   label: 'Dropbox',
   rootId: 'root',
-  rootName: 'Dropbox app folder',
+  rootName: 'Dropbox',
 
   isConfigured: () => Boolean(CONFIG.dropboxAppKey),
   isConnected: () => Boolean(readToken()),
@@ -277,7 +292,7 @@ export const dropbox = {
   },
 
   /**
-   * Saves a skin picture in the app folder ("Music Box pictures") and shares it by link, for shared
+   * Saves a skin picture in a "Music Box/pictures" folder and shares it by link, for shared
    * records. Returns { url, id }: the share link and the file's id.
    */
   async uploadPicture(blob, name) {
@@ -289,7 +304,7 @@ export const dropbox = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
-          'Dropbox-API-Arg': headerJson({ path: `/Music Box pictures/${name}`, mode: 'overwrite', mute: true }),
+          'Dropbox-API-Arg': headerJson({ path: `/Music Box/pictures/${name}`, mode: 'overwrite', mute: true }),
         },
         body: blob,
       })).json();
@@ -338,7 +353,7 @@ export const dropbox = {
 
   emptyHint(folderId) {
     return folderId === 'root'
-      ? 'Press “Add music from Dropbox” to pick songs or folders from anywhere in your Dropbox. (Music in Dropbox → Apps → your app’s folder shows here too.)'
+      ? 'Your Dropbox looks empty.'
       : 'No folders or audio files in this folder.';
   },
 
@@ -346,7 +361,7 @@ export const dropbox = {
   actions(folderId) {
     if (!this.isConnected()) return [];
     loadChooser().catch(() => {}); // ready before the click
-    if (folderId === 'root') return [{ label: '＋ Add music from Dropbox', primary: true, run: () => this.addMusic() }];
+    // Browse covers the whole Dropbox now; the picker stays only for things picked before.
     const at = parsePick(folderId);
     if (at && at.path === '') return [{ label: 'Remove from Music Box', run: () => this.removePick(at.pick.id) }];
     return [];
@@ -396,6 +411,42 @@ export const dropbox = {
   },
 
   /** Returns true if this page load was the return from Dropbox's consent screen. */
+  /** True when the sign-in came from the old Dropbox app and a one-time reconnect is needed. */
+  needsReconnect() {
+    return !readToken() && Boolean(localStorage.getItem(MIGRATE_KEY)); // readToken sets the flag
+  },
+
+  /** Reconnects to the new Dropbox app, keeping the sharing permission if the old sign-in had it. */
+  reconnectFromAppFolder() {
+    const was = JSON.parse(localStorage.getItem(MIGRATE_KEY) || '{}');
+    return this.connect({ sharing: Boolean(was.sharing) });
+  },
+
+  /**
+   * After reconnecting: works out where folders from the old app folder are now (Apps/<old app>/...).
+   * Takes old folder ids, returns a Map of old id -> new path for the ones it found.
+   */
+  async moveFromAppFolder(ids) {
+    const found = new Map();
+    if (!localStorage.getItem(MIGRATE_KEY) || !this.isConnected()) return found;
+    const apps = (await listEntries('/apps', false).catch(() => [])).filter((e) => e['.tag'] === 'folder');
+    for (const id of ids) {
+      if (id === 'root') {
+        if (apps.length === 1) found.set(id, apps[0].path_lower);
+        continue;
+      }
+      for (const app of apps) {
+        try {
+          const meta = await rpc('files/get_metadata', { path: `${app.path_lower}${id}` });
+          found.set(id, meta.path_lower);
+          break;
+        } catch { /* not in this app's folder */ }
+      }
+    }
+    localStorage.removeItem(MIGRATE_KEY);
+    return found;
+  },
+
   async handleRedirect() {
     const q = new URLSearchParams(location.search);
     const pending = JSON.parse(sessionStorage.getItem(PKCE_KEY) || 'null');

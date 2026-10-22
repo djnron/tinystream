@@ -1186,8 +1186,9 @@ function setMarquee(text) {
 
 function updatePlayerUi() {
   const t = player.current;
-  document.body.classList.toggle('has-track', Boolean(t));
-  mini.hidden = !t;
+  // The mini player always shows on phones, so the full player is one tap away even before any music.
+  document.body.classList.add('has-track');
+  mini.hidden = false;
 
   const s = store.settings;
   const status = !t ? 'stopped' : player.loading ? 'loading' : player.playing ? 'playing' : 'paused';
@@ -1213,6 +1214,9 @@ function updatePlayerUi() {
     $('#lcd-fmt').textContent = '';
     $('#lcd-src').textContent = '';
     $('#deck-save').replaceChildren();
+    $('#mini-title').textContent = 'Music Box';
+    $('#mini-sub').textContent = 'Tap to open the player';
+    $('#mini-sub').classList.remove('error');
   } else {
     const qi = player.queueIndex;
     const what = player.loading ? 'Loading…' : player.error ? player.error.message : `${t.name}  —  ${t.folder}`;
@@ -1269,7 +1273,10 @@ function renderPlaylist() {
         h('button', { class: 'pl-row', title: track.folder, onclick: () => player.playQueueIndex(i) },
           h('span', { class: 'pl-num' }, `${i + 1}.`),
           h('span', { class: 'pl-name' }, track.name)))));
-    if (!tracks.length) pl.append(h('li', { class: 'pl-empty' }, 'Playlist is empty. Open a folder and press Play.'));
+    if (!tracks.length) {
+      pl.append(h('li', { class: 'pl-empty' }, 'Playlist is empty. Choose a FOLDER above',
+        wide.matches ? ', or open one in your library.' : ', or tap ⌄ (top right) to browse your music.'));
+    }
   }
   const qi = player.queueIndex;
   const id = player.current?.id ?? null;
@@ -1733,6 +1740,7 @@ async function start() {
     store.events.addEventListener('db-ready', () => toast('All set: this tab can save again'), { once: true });
   }
   await providers.local.init().catch(() => {});
+  let cameBack = false; // back from a Dropbox sign-in page
   try {
     const { dropbox } = providers;
     const pending = JSON.parse(sessionStorage.getItem(PENDING_SHARE) || 'null');
@@ -1741,6 +1749,7 @@ async function start() {
       returned = await dropbox.handleRedirect();
     } catch (err) {
       // Dropbox sent us back with an error (often: sharing permissions not ticked in the console).
+      cameBack = true;
       sessionStorage.removeItem(PENDING_SHARE);
       if (pending) {
         history.replaceState(null, '', hashFor.folder(pending.pid, pending.folderId, pending.name));
@@ -1748,6 +1757,7 @@ async function start() {
       } else throw err;
     }
     if (returned) {
+      cameBack = true;
       sessionStorage.removeItem(PENDING_SHARE);
       if (pending) {
         history.replaceState(null, '', hashFor.folder(pending.pid, pending.folderId, pending.name));
@@ -1766,6 +1776,10 @@ async function start() {
     toast(err.message, { timeout: 8000 });
   }
   switchDropboxApp();
+  // Phones open on the player itself; the library is one tap away (the arrow at its top right).
+  // Not when coming back from signing in, or when a link goes to Settings or the Skin Studio.
+  const first = location.hash.replace(/^#\/?/, '').split('/')[0];
+  if (!wide.matches && !cameBack && first !== 'settings' && first !== 'studio') openFull();
   updateOnline();
   updatePlayerUi();
   syncViz();

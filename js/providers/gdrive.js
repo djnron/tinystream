@@ -239,6 +239,16 @@ export const gdrive = {
     return chosen.flatMap((c) => c.tracks.map((f) => toTrack(f, c.name)));
   },
 
+  /** Where to stream a song from. Drive needs the sign-in as a header, so the player streams it via the service worker. */
+  async streamUrl(track) {
+    const token = await getToken();
+    return {
+      url: `${API}/files/${encodeURIComponent(track.fileId)}?alt=media&supportsAllDrives=true`,
+      headers: { Authorization: `Bearer ${token}` },
+      ttl: 40 * 60e3, // sign-ins last an hour
+    };
+  },
+
   async fetchBlob(track, { signal } = {}) {
     const url = `${API}/files/${encodeURIComponent(track.fileId)}?alt=media&supportsAllDrives=true`;
     const res = await authedFetch(url, { signal });

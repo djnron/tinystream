@@ -503,6 +503,16 @@ export const dropbox = {
     return tracks;
   },
 
+  /**
+   * A direct address the player can stream from (Dropbox's temporary link: good for 4 hours, supports
+   * seeking, and isn't a share link). Songs picked with the old picker play the download way.
+   */
+  async streamUrl(track) {
+    if (track.fileId.startsWith('pick:')) return null;
+    const { link } = await rpc('files/get_temporary_link', { path: track.fileId });
+    return { url: link, ttl: 3 * 3600e3 };
+  },
+
   async fetchBlob(track, { signal } = {}) {
     if (track.fileId.startsWith('pick:')) {
       const at = parsePick(track.fileId);

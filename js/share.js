@@ -365,6 +365,15 @@ export function downloadUrl(track) {
 export const sharedSource = {
   id: 'shared',
   label: 'Shared record',
+  /** Shared songs stream straight from Drive or Dropbox (no account needed). */
+  async streamUrl(track) {
+    if (track.src === 'd') return { url: `https://dl.dropboxusercontent.com${track.fileId}`, ttl: 6 * 3600e3 };
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(track.fileId)}?alt=media&supportsAllDrives=true&key=${encodeURIComponent(CONFIG.googleApiKey)}`;
+    return track.resourceKey
+      ? { url, headers: { 'X-Goog-Drive-Resource-Keys': `${track.fileId}/${track.resourceKey}` }, ttl: 6 * 3600e3 }
+      : { url, ttl: 6 * 3600e3 };
+  },
+
   async fetchBlob(track, { signal } = {}) {
     let res;
     if (track.src === 'g') {

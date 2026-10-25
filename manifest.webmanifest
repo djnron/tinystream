@@ -1,7 +1,7 @@
 {
   "name": "Music Box",
   "short_name": "Music Box",
-  "description": "Play your music straight from Google Drive and Dropbox.",
+  "description": "Play your music from Google Drive, Dropbox or your device.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

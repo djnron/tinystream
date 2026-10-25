@@ -51,7 +51,7 @@ export class Player extends EventTarget {
         this.#playAt(this.pos, { resumeAt: at, noStream: this.streamRetry++ > 0 });
         return;
       }
-      this.#skipAfterError(new Error('This file could not be played'));
+      this.#skipAfterError(new Error('This file couldn’t be played. It may be a format your browser doesn’t support.'));
     });
     this.#setupMediaSession();
   }
@@ -230,7 +230,7 @@ export class Player extends EventTarget {
         this.dispatchEvent(new CustomEvent('auth-required', { detail: err }));
         return;
       }
-      return this.#skipAfterError(isNetworkError(err) ? new Error('Offline and not saved on this device') : err);
+      return this.#skipAfterError(isNetworkError(err) ? new Error('You’re offline, and this song isn’t saved on this device') : err);
     }
     if (seq !== this.loadSeq) {
       if (!streaming) URL.revokeObjectURL(src);

@@ -256,10 +256,10 @@ export function parseSkinFile(text) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error("That file isn't valid JSON");
+    throw new Error('That isn’t a Music Box skin file. Use a .json file saved from Settings → Skin.');
   }
   if (!data || typeof data !== 'object' || typeof data.tokens !== 'object') {
-    throw new Error('A skin file needs a "tokens" object — download the template to see the format');
+    throw new Error('That isn’t a Music Box skin file. To see the format, press “Save skin as a file” in Settings → Skin.');
   }
   const name = String(data.name || 'My skin').slice(0, MAX_NAME);
   return {
@@ -275,7 +275,7 @@ export function validateTokens(input) {
     if (!(key in TOKENS)) continue;
     const v = String(value).trim();
     if (v.length > 300 || !SAFE_VALUE.test(v) || /url\s*\(|expression|image-set/i.test(v)) {
-      throw new Error(`The value for "${key}" isn't allowed`);
+      throw new Error(`The skin file has a value Music Box can’t use for “${key}”.`);
     }
     tokens[key] = v;
   }
@@ -285,8 +285,8 @@ export function validateTokens(input) {
 export function skinTemplate(base) {
   return JSON.stringify({
     name: `${base.name} (my copy)`,
-    about: 'Music Box skin. Edit any token (CSS colors, gradients, fonts, sizes) and pick layout options '
-      + 'from the lists in "layoutOptions", then load it from Settings → Skin.',
+    about: 'A Music Box skin. Change any value in "tokens" (CSS colors, gradients, fonts, sizes) and pick layout '
+      + 'options from the lists in "layoutOptions". Then load it in Settings → Skin → Load skin file.',
     tokens: { ...TOKENS, ...base.tokens },
     layout: validateLayout(base.layout),
     layoutOptions: { ...LAYOUT, width: `${WIDTH_RANGE[0]}-${WIDTH_RANGE[1]}` },

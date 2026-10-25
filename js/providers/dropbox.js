@@ -103,9 +103,9 @@ async function tokenRequest(params) {
     body: new URLSearchParams({ client_id: CONFIG.dropboxAppKey, ...params }),
   });
   if (res.status === 400 || res.status === 401) {
-    throw new AuthRequiredError(ID, 'Dropbox sign-in expired');
+    throw new AuthRequiredError(ID, 'Your Dropbox sign-in expired. Sign in again to continue.');
   }
-  if (!res.ok) throw new Error(`Dropbox sign-in error ${res.status}`);
+  if (!res.ok) throw new Error(`Couldn’t sign in to Dropbox (error ${res.status}). Try again.`);
   return res.json();
 }
 
@@ -131,7 +131,9 @@ async function call(url, init = {}) {
   if (res.status === 401) throw new AuthRequiredError(ID);
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`Dropbox error ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`);
+    if (/not_found/.test(detail)) throw new Error('That file or folder isn’t in your Dropbox any more.');
+    console.warn('Dropbox', res.status, detail.slice(0, 300));
+    throw new Error(`Dropbox had a problem (error ${res.status}). Try again in a moment.`);
   }
   return res;
 }
@@ -171,7 +173,7 @@ async function listEntries(path, recursive, limit = Infinity) {
 
 function parentName(pathDisplay) {
   const parts = pathDisplay.split('/');
-  return parts.length > 2 ? parts[parts.length - 2] : 'Dropbox app folder';
+  return parts.length > 2 ? parts[parts.length - 2] : 'Dropbox';
 }
 
 function toTrack(e) {
@@ -322,8 +324,7 @@ export const dropbox = {
       // their own, and the app can't make one (it can't see outside its folder).
       const at = parsePick(fileId);
       if (at && at.path === '') return at.pick.url;
-      throw new Error('Songs inside a folder picked from Dropbox can’t go in a record yet. Pick the songs themselves '
-        + '(“Add music from Dropbox”, then select the songs), or put the folder in the app folder.');
+      throw new Error('This folder was added with the old Dropbox picker, so it can’t be shared. Open it from Dropbox → Browse to share it.');
     }
     if (!this.canShare()) throw Object.assign(new Error('Dropbox needs permission to make share links'), { code: 'dropbox-scope' });
     const res = await rawRpc('sharing/create_shared_link_with_settings', { path: fileId });
@@ -339,7 +340,7 @@ export const dropbox = {
     if (res.status === 401 || /missing_scope/.test(JSON.stringify(res.data))) {
       throw Object.assign(new Error('Dropbox needs permission to make share links'), { code: 'dropbox-scope' });
     }
-    throw new Error(`Dropbox couldn't share a song (${res.data?.error_summary || res.status})`);
+    throw new Error(`Dropbox couldn’t share a song (${res.data?.error_summary || res.status}). Try again.`);
   },
 
   async unshareFile(url) {
@@ -347,14 +348,14 @@ export const dropbox = {
 
     const res = await rawRpc('sharing/revoke_shared_link', { url });
     if (!res.ok && res.data?.error?.['.tag'] !== 'shared_link_not_found') {
-      throw new Error(`Dropbox error ${res.data?.error_summary || res.status}`);
+      throw new Error(`Dropbox couldn’t stop sharing (${res.data?.error_summary || res.status}). Try again.`);
     }
   },
 
   emptyHint(folderId) {
     return folderId === 'root'
       ? 'Your Dropbox looks empty.'
-      : 'No folders or audio files in this folder.';
+      : 'No music or folders here.';
   },
 
   /** Extra buttons on the Dropbox browse screen. */
@@ -453,7 +454,7 @@ export const dropbox = {
     if (!pending || !q.has('state') || q.get('state') !== pending.state) return false;
     sessionStorage.removeItem(PKCE_KEY);
     history.replaceState(null, '', redirectUri() + (pending.back || '#/'));
-    if (q.has('error')) throw new Error(q.get('error_description') || 'Dropbox access was not granted');
+    if (q.has('error')) throw new Error(q.get('error_description') || 'Dropbox wasn’t connected. To try again, press Connect and choose Allow.');
     const resp = await tokenRequest({
       grant_type: 'authorization_code',
       code: q.get('code'),

@@ -195,12 +195,12 @@ function header() {
       h('span', { class: 'spacer' }),
       h('button', { class: 'btn', id: 'st-undo', title: 'Undo', onclick: undo }, '↶'),
       h('button', { class: 'btn', id: 'st-redo', title: 'Redo', onclick: redo }, '↷'),
-      h('button', { class: 'btn primary', onclick: surpriseMe, title: 'Roll everything but your pictures and fonts' },
+      h('button', { class: 'btn primary', onclick: surpriseMe, title: 'New colors, shape and artwork. Keeps your pictures and fonts.' },
         icon('dice'), 'Surprise me'),
       !ctx.isWide() && h('button', { class: 'btn', onclick: ctx.openPreview }, icon('play'), 'Preview')),
     h('p', { class: 'setting-desc' }, saved
-      ? 'Changes show on the player straight away and are saved in My skins.'
-      : 'This is a copy of your current skin. Change anything and it’s saved in My skins.'));
+      ? 'Changes show on the player right away and save automatically to My skins.'
+      : 'You’re editing a copy of your current skin. Your first change saves it to My skins.'));
 }
 
 async function surpriseMe() {
@@ -301,7 +301,7 @@ function colorsSection() {
     firstPic && h('button', { class: 'btn', onclick: () => colorsFromPicture(firstPic) }, '🎨 Colors from my picture'),
     slider('Corners', parseInt(draft.tokens.radius, 10) || 0, 0, 28, 1,
       (v) => commit((d) => { d.tokens.radius = `${v}px`; }, 'radius'), (v) => `${v}px`)),
-  h('p', { class: 'setting-desc' }, 'Pick five colors and the rest is worked out for you, always readable. Deep has every color on its own.'));
+  h('p', { class: 'setting-desc' }, 'Pick five colors and Music Box sets the rest, keeping text readable. To set every color yourself, use Deep.'));
 }
 
 async function colorsFromPicture(pic) {
@@ -316,7 +316,7 @@ async function colorsFromPicture(pic) {
     setColors(colors);
     rebuild();
   } catch {
-    toast('Couldn’t read the colors from that picture (the site it’s linked from doesn’t allow it)');
+    toast('Couldn’t read colors from that picture. The website it’s linked from doesn’t allow it.');
   }
 }
 
@@ -338,7 +338,7 @@ function fontsSection() {
   return section('Fonts', null,
     field('Screen & playlist', fontChips(DISPLAY_FONTS, 'font-lcd', '12:34')),
     field('Labels & library', fontChips(LABEL_FONTS, 'font-ui', 'Aa')),
-    h('p', { class: 'setting-desc' }, 'Want another one? Deep lets you type any Google Font.'));
+    h('p', { class: 'setting-desc' }, 'For any other Google Font, use Deep.'));
 }
 
 function layoutSection() {
@@ -362,7 +362,7 @@ function artSection(deep) {
   return section('Artwork', { run: () => {
     commit((d) => { d.art = validateArt(rollArt(Math.random, d.tokens)); });
     rebuild();
-  }, title: 'New generated artwork' },
+  }, title: 'New artwork' },
   field('Base', chips(ART.base, art.base, (v) => setArt((a) => { a.base = v; }), { name: 'Base' })),
   field('Layers (up to 4)', chips(ART.overlay, art.overlays || [], (v) => setArt((a) => {
     const set = new Set(a.overlays || []);
@@ -391,7 +391,7 @@ function effectsSection() {
 
 function picturesSection(deep) {
   const list = draft.pictures;
-  const addZone = list.length < MAX_PICTURES ? pictureAdder() : h('p', { class: 'setting-desc' }, `Up to ${MAX_PICTURES} pictures.`);
+  const addZone = list.length < MAX_PICTURES ? pictureAdder() : h('p', { class: 'setting-desc' }, `A skin can have ${MAX_PICTURES} pictures. Remove one to add another.`);
   return section('Pictures', null,
     list.length ? h('div', { class: 'pic-cards' }, list.map((p, i) => pictureCard(p, i, deep))) : null,
     addZone,
@@ -400,7 +400,7 @@ function picturesSection(deep) {
 
 function pictureAdder() {
   const status = h('span', { class: 'muted pic-status' });
-  const input = h('input', { type: 'url', placeholder: 'https://… link to a picture', 'aria-label': 'Picture link' });
+  const input = h('input', { type: 'url', placeholder: 'Paste a picture link (https://…)', 'aria-label': 'Picture link' });
   const defaults = () => (draft.pictures.length ? { area: 'sticker', fit: 'contain', opacity: 1, scale: 60 } : { area: 'deck', fit: 'cover', opacity: 0.55 });
   const add = async (job) => {
     status.textContent = 'Adding…';
@@ -408,7 +408,7 @@ function pictureAdder() {
       const out = await job();
       const pic = out.picture || out;
       commit((d) => { d.pictures = [...d.pictures, pic]; });
-      if (out.copied === false) toast('Linked: that site doesn’t allow a copy, so it needs the internet and some effects won’t apply');
+      if (out.copied === false) toast('Added as a link. That website doesn’t allow copies, so the picture needs internet and some effects won’t work.');
       rebuild();
     } catch (err) {
       status.textContent = err.message;
@@ -439,14 +439,14 @@ function pictureCard(p, i, deep) {
   pictureUrl(p.src).then((url) => { if (url) thumb.style.backgroundImage = `url("${url}")`; });
   const rest = p.area === 'sticker'
     ? [slider('Size', p.scale, 20, 300, 5, (v) => set((x) => { x.scale = v; }, 'scale'), (v) => `${v}%`),
-      field('Spot', chips(CORNERS, p.corner, (v) => set((x) => { x.corner = v; }), { label: (c) => c.replace('-', ' '), name: 'Spot' })),
+      field('Position', chips(CORNERS, p.corner, (v) => set((x) => { x.corner = v; }), { label: (c) => c.replace('-', ' '), name: 'Position' })),
       slider('Turn', p.rotate, -45, 45, 1, (v) => set((x) => { x.rotate = v; }, 'rotate'), (v) => `${v}°`)]
     : [field('Fit', chips(FITS, p.fit, (v) => { set((x) => { x.fit = v; }); rebuild(); }, { label: (f) => FIT_LABELS[f], name: 'Fit' })),
       p.fit === 'tile' && slider('Tile size', p.scale, 10, 300, 5, (v) => set((x) => { x.scale = v; }, 'scale'), (v) => `${v}%`)];
   return h('div', { class: 'pic-card' },
     h('div', { class: 'pic-top' }, thumb,
       h('div', { class: 'pic-where' },
-        field('Show it on', chips(AREAS, p.area, (v) => { set((x) => { x.area = v; if (v === 'sticker') { x.fit = 'contain'; x.opacity = Math.max(x.opacity, 0.9); } }); rebuild(); }, { label: (a) => AREA_LABELS[a], name: 'Where' }))),
+        field('Show on', chips(AREAS, p.area, (v) => { set((x) => { x.area = v; if (v === 'sticker') { x.fit = 'contain'; x.opacity = Math.max(x.opacity, 0.9); } }); rebuild(); }, { label: (a) => AREA_LABELS[a], name: 'Where' }))),
       h('button', { class: 'icon-btn', title: 'Remove picture', 'aria-label': 'Remove picture', html: icons.trash, onclick: async () => {
         const src = p.src;
         commit((d) => { d.pictures = d.pictures.filter((_, j) => j !== i); });
@@ -510,8 +510,8 @@ function tokenRow(key) {
 }
 
 function tokensSection() {
-  return section('Every color & style', null,
-    h('p', { class: 'setting-desc' }, 'Any CSS color, gradient, shadow or font list works. Pictures go in Pictures, not here.'),
+  return section('Every color and style', null,
+    h('p', { class: 'setting-desc' }, 'Each value takes any CSS color, gradient, shadow or font list. Add pictures in Pictures above.'),
     TOKEN_GROUPS.map(([title, keys]) => h('details', { class: 'tok-group', open: title === 'Player window' },
       h('summary', {}, title), keys.map(tokenRow))));
 }
@@ -523,12 +523,12 @@ function customFontsSection() {
     return field(label, h('form', { class: 'pic-link', onsubmit: (e) => {
       e.preventDefault();
       const name = input.value.trim().replace(/\s+/g, ' ');
-      if (!validateFonts([name]).length) { status.textContent = 'Letters, numbers and spaces only'; return; }
+      if (!validateFonts([name]).length) { status.textContent = 'Use letters, numbers and spaces only.'; return; }
       commit((d) => {
         d.meta.customFonts = validateFonts([...(d.meta.customFonts || []), name]).slice(-4);
         d.tokens[token] = `"${name}", ${fallback}`;
       });
-      status.textContent = `Using ${name} (if Google Fonts has it)`;
+      status.textContent = `Using ${name}. If nothing changes, check the name on fonts.google.com.`;
     } }, input, h('button', { class: 'btn', type: 'submit' }, 'Use')), status);
   };
   return section('Any Google Font', null,
@@ -546,7 +546,7 @@ function fileSection() {
   const area = h('textarea', { class: 'st-json', rows: 14, spellcheck: false }, plain());
   const status = h('span', { class: 'muted' });
   return section('Skin file', null,
-    h('p', { class: 'setting-desc' }, 'Edit the whole skin as text. Uploaded pictures aren’t in the file.'),
+    h('p', { class: 'setting-desc' }, 'Edit the whole skin as text. Pictures you uploaded aren’t included.'),
     area,
     h('div', { class: 'actions' },
       h('button', { class: 'btn primary', onclick: () => {
@@ -575,7 +575,7 @@ function fileSection() {
 }
 
 async function deleteSkin() {
-  if (!saved) { toast('This skin isn’t saved yet'); return; }
+  if (!saved) { toast('Nothing to delete yet. Your first change saves this skin.'); return; }
   const gone = draft;
   ctx.store.setSetting('mySkins', mySkins().filter((s) => s.id !== gone.id));
   for (const p of gone.pictures) await forgetIfUnused(p.src, [...mySkins(), ctx.store.settings.customSkin]);

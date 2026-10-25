@@ -10,7 +10,7 @@ export function GET(request) {
   const card = decodeCard(c);
   const title = card?.title || 'A record on Music Box';
   const songs = card?.count ? `${card.count} song${card.count === 1 ? '' : 's'}` : 'Songs';
-  const desc = `${songs} to play right in your browser, no account needed${card?.skin ? `, in the skin “${card.skin}”` : ''}.`;
+  const desc = `${songs} to play in your browser, no account needed${card?.skin ? `, in the skin “${card.skin}”` : ''}.`;
   const image = `${url.origin}/api/card?c=${encodeURIComponent(c)}`;
   const e = escapeHtml;
   const html = `<!doctype html>

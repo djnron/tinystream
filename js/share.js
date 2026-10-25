@@ -82,7 +82,7 @@ function dropboxPath(url) {
   u.searchParams.delete('raw');
   u.searchParams.delete('st');
   const path = u.pathname + (u.search || '');
-  if (!DROPBOX_PATH.test(path)) throw new Error('Dropbox returned a link Music Box does not recognise');
+  if (!DROPBOX_PATH.test(path)) throw new Error('Dropbox gave back a link Music Box doesn’t recognize. Try again.');
   return path;
 }
 
@@ -383,7 +383,7 @@ export const sharedSource = {
     } else {
       res = await fetch(`https://dl.dropboxusercontent.com${track.fileId}`, { signal });
     }
-    if (!res.ok) throw new Error(res.status === 404 || res.status === 403 ? 'The sender stopped sharing this song' : `Couldn't load (${res.status})`);
+    if (!res.ok) throw new Error(res.status === 404 || res.status === 403 ? 'The sender stopped sharing this song' : `Couldn’t load this song (error ${res.status})`);
     return withAudioType(await res.blob(), track.fileName);
   },
 };

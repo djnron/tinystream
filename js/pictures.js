@@ -113,11 +113,11 @@ export async function addFile(file, defaults = {}) {
   try {
     blob = file.type === 'image/gif' ? file : await withTimeout(shrink(file), 20000, 'timeout'); // keep GIFs animated
   } catch {
-    throw new Error("Couldn't read that picture. Try a JPEG or PNG.");
+    throw new Error("Couldn’t read that picture. Try a JPEG or PNG.");
   }
   if (blob.size > 6e6) throw new Error('That animated picture is too big (6 MB at most)');
   const id = newId();
-  await withTimeout(putPicture(id, blob), 15000, 'Couldn’t save the picture on this device. Close other Music Box tabs or windows, reload, and try again.');
+  await withTimeout(putPicture(id, blob), 15000, 'Couldn’t save the picture on this device. Close other Music Box tabs or windows, reload, then try again.');
   return validatePicture({ ...defaults, src: `pic:${id}` });
 }
 
@@ -139,9 +139,9 @@ export async function addLink(url, defaults = {}) {
     await withTimeout(new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = resolve;
-      img.onerror = () => reject(new Error("Couldn't load a picture from that link. Use a link straight to the image (it usually ends in .jpg or .png)."));
+      img.onerror = () => reject(new Error('Couldn’t load a picture from that link. Use a link to the image itself (it usually ends in .jpg or .png).'));
       img.src = link;
-    }), 15000, "That link took too long to load. Use a link straight to the image (it usually ends in .jpg or .png).");
+    }), 15000, 'That link took too long to load. Use a link to the image itself (it usually ends in .jpg or .png).');
     return { picture: validatePicture({ ...defaults, src: link }), copied: false };
   }
 }

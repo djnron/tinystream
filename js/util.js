@@ -2,7 +2,7 @@
 
 /** Thrown when a provider needs the user to sign in (again) before it can continue. */
 export class AuthRequiredError extends Error {
-  constructor(providerId, message = 'Sign-in required') {
+  constructor(providerId, message = 'Sign in again to continue') {
     super(message);
     this.name = 'AuthRequiredError';
     this.providerId = providerId;

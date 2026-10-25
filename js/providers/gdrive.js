@@ -23,7 +23,7 @@ function loadScript(src) {
     s.src = src;
     s.async = true;
     s.onload = resolve;
-    s.onerror = () => reject(new Error(`Could not load ${new URL(src).hostname}`));
+    s.onerror = () => reject(new Error(`Couldn’t reach ${new URL(src).hostname}. Check your connection and try again.`));
     document.head.append(s);
   });
 }
@@ -40,7 +40,7 @@ function loadPicker() {
   if (window.google?.picker) return Promise.resolve();
   pickerPromise ??= loadScript('https://apis.google.com/js/api.js')
     .then(() => new Promise((resolve, reject) => window.gapi.load('picker', { callback: resolve, onerror: reject })))
-    .catch((e) => { pickerPromise = null; throw e instanceof Error ? e : new Error('Could not load the Google Picker'); });
+    .catch((e) => { pickerPromise = null; throw e instanceof Error ? e : new Error('Couldn’t open Google’s file picker. Check your connection and try again.'); });
   return pickerPromise;
 }
 
@@ -73,7 +73,7 @@ async function requestToken(prompt) {
         resolve(token.access_token);
       },
       // Popup blocked/closed: the user has to press "Reconnect" (a real click) to continue.
-      error_callback: (err) => reject(new AuthRequiredError(ID, err?.message || 'Google sign-in was interrupted')),
+      error_callback: (err) => reject(new AuthRequiredError(ID, err?.message || 'Google sign-in didn’t finish. Try again.')),
     });
     client.requestAccessToken({ prompt });
   });
@@ -99,9 +99,9 @@ async function authedRequest(url, init = {}) {
 async function authedFetch(url, { signal } = {}) {
   const res = await authedRequest(url, { signal });
   if (res.status === 404 || res.status === 403) {
-    throw new Error('Google Drive no longer shares this file with Music Box. Add it again with “Add music”.');
+    throw new Error('Music Box can’t open this song any more. Add it again with “＋ Add music from Google Drive”.');
   }
-  if (!res.ok) throw new Error(`Google Drive error ${res.status}`);
+  if (!res.ok) throw new Error(`Google Drive had a problem (error ${res.status}). Try again in a moment.`);
   return res;
 }
 
@@ -119,7 +119,7 @@ async function pictureFolder() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'Music Box pictures', mimeType: 'application/vnd.google-apps.folder' }),
   });
-  if (!res.ok) throw new Error(`Google Drive couldn't make a folder for pictures (${res.status})`);
+  if (!res.ok) throw new Error(`Google Drive couldn’t make a folder for your pictures (error ${res.status}). Try again.`);
   const { id } = await res.json();
   localStorage.setItem(PICTURE_FOLDER, id);
   return id;
@@ -229,7 +229,7 @@ export const gdrive = {
       };
     }
     const c = collections.find((x) => x.id === folderId);
-    if (!c) throw new Error('That collection was removed');
+    if (!c) throw new Error('That folder was removed from Music Box');
     return { folders: [], tracks: c.tracks.map((f) => toTrack(f, c.name)) };
   },
 
@@ -272,7 +272,7 @@ export const gdrive = {
         throw new Error('Google Drive won\'t share this song by link. Your organization may block sharing outside it '
           + '(Google Admin → Apps → Drive → Sharing settings).');
       }
-      throw new Error(`Google Drive couldn't share a song (${res.status})`);
+      throw new Error(`Google Drive couldn’t share a song (error ${res.status}). Try again.`);
     }
     const meta = await (await authedRequest(`${API}/files/${encodeURIComponent(fileId)}?fields=resourceKey&supportsAllDrives=true`)).json().catch(() => ({}));
     return meta.resourceKey || null;
@@ -291,7 +291,7 @@ export const gdrive = {
     form.append('file', blob);
     const res = await authedRequest('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form });
     if (res.status === 404) { localStorage.removeItem(PICTURE_FOLDER); }
-    if (!res.ok) throw new Error(`Google Drive couldn't save a picture (${res.status})`);
+    if (!res.ok) throw new Error(`Google Drive couldn’t save a picture (error ${res.status}). Try again.`);
     const { id } = await res.json();
     return { ref: id, key: await this.shareFile(id) };
   },
@@ -299,7 +299,7 @@ export const gdrive = {
   /** Turns "anyone with the link" back off for one file. */
   async unshareFile(fileId) {
     const res = await authedRequest(`${API}/files/${encodeURIComponent(fileId)}/permissions/anyoneWithLink?supportsAllDrives=true`, { method: 'DELETE' });
-    if (!res.ok && res.status !== 404) throw new Error(`Google Drive error ${res.status}`);
+    if (!res.ok && res.status !== 404) throw new Error(`Google Drive couldn’t stop sharing (error ${res.status}). Try again.`);
   },
 
   /** Extra buttons the browse screen shows for this source. */
@@ -314,8 +314,8 @@ export const gdrive = {
 
   emptyHint(folderId) {
     return folderId === 'root'
-      ? 'Music Box can only see songs you pick. Press “Add music from Google Drive” and choose songs or a folder.'
-      : 'No songs in this collection yet.';
+      ? 'Music Box only sees songs you choose. Press “＋ Add music from Google Drive” to pick songs or a folder.'
+      : 'No songs here yet. Press “＋ Add more” to add some.';
   },
 
   /**
@@ -373,8 +373,8 @@ export const gdrive = {
     }
     let msg = added.length ? `Added ${added.length} song${added.length === 1 ? '' : 's'}` : 'No songs were added';
     if (emptyFolders) {
-      msg += `. Google didn't share the songs inside ${emptyFolders === 1 ? 'that folder' : 'those folders'}: `
-        + 'open the folder in the picker and select the songs instead (shift-click selects a range).';
+      msg += `. Google didn’t include the songs inside ${emptyFolders === 1 ? 'that folder' : 'those folders'}. `
+        + 'Open the folder in the picker and select the songs themselves (Shift+click selects several).';
     }
     return msg;
   },
@@ -382,7 +382,7 @@ export const gdrive = {
   rename(id) {
     const lib = readLibrary();
     const c = lib.collections.find((x) => x.id === id);
-    const name = c && prompt('Name this collection', c.name);
+    const name = c && prompt('Name this folder', c.name);
     if (!name?.trim()) return null;
     c.name = name.trim().slice(0, 60);
     writeLibrary(lib);

@@ -109,7 +109,7 @@ export async function init() {
 }
 
 export async function saveTrack(track, blob) {
-  if (!settings.allowDownloads) throw new Error('Downloads are turned off in Settings');
+  if (!settings.allowDownloads) throw new Error('Turn on “Save songs on this device” in Settings first');
   const meta = { ...track, size: blob.size, savedAt: Date.now() };
   await run(['tracks', 'blobs'], 'readwrite', (t) => {
     t.objectStore('tracks').put(meta);

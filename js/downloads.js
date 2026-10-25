@@ -19,7 +19,7 @@ export function isQueued(id) {
 }
 
 export function enqueue(tracks) {
-  if (!store.settings.allowDownloads) throw new Error('Turn on "Allow downloads" in Settings first');
+  if (!store.settings.allowDownloads) throw new Error('Turn on “Save songs on this device” in Settings first');
   const fresh = tracks.filter((t) => !store.savedIds.has(t.id) && !isQueued(t.id));
   queue.push(...fresh);
   emit();

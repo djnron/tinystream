@@ -106,8 +106,8 @@ function saveButton(track) {
   }
   return h('button', {
     class: 'icon-btn',
-    title: 'Save to this device',
-    'aria-label': `Save ${track.name} to this device`,
+    title: 'Save for offline',
+    'aria-label': `Save ${track.name} for offline`,
     html: icons.download,
     onclick: (e) => {
       e.stopPropagation();
@@ -187,13 +187,13 @@ function homeView() {
     let primary = null;
     let extra = [];
     if (!configured) {
-      status = 'Not set up — add your key in config.js (see README).';
+      status = 'Not set up yet. Add its key to config.js (the README explains how).';
     } else if (connected) {
-      status = isLocal ? `“${p.rootName}” · files stay on this device` : 'Connected · read-only access';
+      status = isLocal ? `“${p.rootName}” · stays on this device` : 'Connected · read-only';
       primary = h('a', { class: 'btn primary', href: hashFor.folder(p.id, p.rootId, p.rootName) }, 'Browse');
       extra = [
         isLocal && h('button', { class: 'link', onclick: () => connect(p) }, 'Change folder'),
-        h('button', { class: 'link', onclick: () => disconnect(p) }, isLocal ? 'Forget' : 'Disconnect'),
+        h('button', { class: 'link', onclick: () => disconnect(p) }, isLocal ? 'Forget folder' : 'Disconnect'),
       ];
     } else {
       status = isLocal ? 'Any folder on this device. No account needed.' : 'Not connected';
@@ -204,10 +204,10 @@ function homeView() {
 
   const saved = store.settings.allowDownloads || store.savedIds.size
     ? sourceRow('phone', 'device', 'Saved for offline',
-      `${store.savedIds.size} track${store.savedIds.size === 1 ? '' : 's'} · plays without a connection`,
+      `${store.savedIds.size} song${store.savedIds.size === 1 ? '' : 's'} · play without internet`,
       h('a', { class: 'btn', href: hashFor.saved() }, 'Open'))
-    : sourceRow('phone', 'device', 'Downloads are off',
-      'Cloud music streams and nothing is stored on this device.',
+    : sourceRow('phone', 'device', 'Offline listening is off',
+      'Songs stream from the cloud. Nothing is saved on this device.',
       h('a', { class: 'btn', href: hashFor.settings() }, 'Settings'));
 
   show(h('div', { class: 'stack home' },
@@ -252,7 +252,7 @@ function pinTiles() {
     const first = Object.values(providers).find((p) => p.isConfigured() && p.isConnected());
     return h('div', { class: 'tiles' },
       h('div', { class: 'tile empty' },
-        h('p', {}, 'Pin folders while browsing (☆ Pin) and they show up here, one tap to play.'),
+        h('p', {}, 'Pin a folder while browsing (☆ Pin) to keep it here. Then tap it to play.'),
         first && h('a', { class: 'btn', href: hashFor.folder(first.id, first.rootId, first.rootName) }, `Browse ${first.label}`)));
   }
   return h('ul', { class: 'tiles' }, list.map((f) => {
@@ -274,7 +274,7 @@ function pinTiles() {
 async function playFolder(f) {
   const p = getProvider(f.pid);
   if (!p?.isConnected()) {
-    toast(`Connect ${p?.label || 'that source'} first`);
+    toast(`Connect ${p?.label || 'that source'} to play this folder`);
     return;
   }
   const t = toast(`Loading “${f.name}”…`, { timeout: 0 });
@@ -283,14 +283,14 @@ async function playFolder(f) {
       onProgress: (n) => { t.firstChild.textContent = `Loading “${f.name}”… ${n}`; },
     });
     t.remove();
-    if (!tracks.length) return toast(`No music in “${f.name}”`);
+    if (!tracks.length) return toast(`No songs found in “${f.name}”`);
     currentSource = f;
     player.playList(tracks, 0);
-    toast(`Playing ${tracks.length} tracks from “${f.name}”`);
+    toast(`Playing ${tracks.length} song${tracks.length === 1 ? '' : 's'} from “${f.name}”`);
   } catch (err) {
     t.remove();
     if (err instanceof AuthRequiredError) {
-      toast(err.message, { timeout: 0, action: { label: 'Allow', run: () => p.reconnect().then(() => playFolder(f)).catch((e) => toast(e.message)) } });
+      toast(err.message, { timeout: 0, action: { label: 'Sign in', run: () => p.reconnect().then(() => playFolder(f)).catch((e) => toast(e.message)) } });
     } else toast(err.message);
   }
 }
@@ -301,13 +301,13 @@ let currentSource = null;
 async function browseView(pid, folderId, name, stale) {
   const p = getProvider(pid);
   rows.clear();
-  if (!p) return show(message('Unknown source', null, h('a', { class: 'btn', href: '#/' }, 'Library')));
+  if (!p) return show(message('This music source isn’t available', null, h('a', { class: 'btn', href: '#/' }, 'Back to library')));
   folderId ||= p.rootId;
   name ||= p.rootName;
   setTitle(name);
-  if (!p.isConfigured()) return show(message(`${p.label} isn't set up`, 'Add your key in config.js — see the README.'));
+  if (!p.isConfigured()) return show(message(`${p.label} isn’t set up yet`, 'Add its key to config.js. The README explains how.'));
   if (!p.isConnected()) {
-    return show(message(`Connect ${p.label}`, 'Music Box only asks for read-only access.',
+    return show(message(`Connect ${p.label}`, 'Music Box only asks to read your files. It never changes them.',
       h('button', { class: 'btn primary', onclick: () => connect(p) }, 'Connect')));
   }
   updateTrail(pid, folderId, name);
@@ -335,10 +335,10 @@ async function browseView(pid, folderId, name, stale) {
         return show(crumbs, message('Allow access to your music folder', err.message,
           reconnectButton(p, render, 'Allow access'), h('button', { class: 'btn', onclick: () => connect(p) }, 'Choose another folder')));
       }
-      return show(crumbs, message('Sign-in needed', `${p.label} needs you to sign in again.`, reconnectButton(p)));
+      return show(crumbs, message(`Sign in to ${p.label} again`, 'Sign-ins expire after a while to keep your account safe.', reconnectButton(p, render, 'Sign in')));
     } else {
-      return show(crumbs, message("Couldn't load this folder",
-        isNetworkError(err) ? "You're offline and this folder isn't saved." : err.message,
+      return show(crumbs, message('Couldn’t open this folder',
+        isNetworkError(err) ? 'You’re offline, and this folder wasn’t saved for offline listening.' : err.message,
         h('button', { class: 'btn', onclick: render }, 'Try again')));
     }
   }
@@ -379,7 +379,7 @@ async function browseView(pid, folderId, name, stale) {
     canShare && h('button', { class: 'btn', onclick: () => openShareDialog({ pid, folderId, name }) }, '⤴ Share as record'),
     h('button', {
       class: `btn${pinned ? ' on' : ''}`,
-      title: pinned ? 'Unpin from My folders' : 'Pin to My folders for one-tap switching',
+      title: pinned ? 'Remove from My folders' : 'Add to My folders on the Library page',
       onclick: () => { togglePin(pid, folderId, name); render(); },
     }, pinned ? '★ Pinned' : '☆ Pin'),
     tracks.length > 0 && h('button', { class: 'btn primary', onclick: () => { currentSource = { pid, id: folderId, name }; player.playList(tracks, 0, { shuffle: false }); } },
@@ -387,21 +387,21 @@ async function browseView(pid, folderId, name, stale) {
     tracks.length > 0 && h('button', { class: 'btn', onclick: () => { currentSource = { pid, id: folderId, name }; player.playList(tracks, 0, { shuffle: true }); } },
       iconSpan('shuffle'), 'Shuffle'),
     folders.length > 0 && !fromCache && h('button', { class: 'btn', onclick: () => playFolder({ pid, id: folderId, name }) },
-      iconSpan('layers'), 'Play all incl. subfolders'),
+      iconSpan('layers'), 'Play all, with subfolders'),
     tracks.length > 0 && store.settings.allowDownloads && !fromCache && h('button', {
       class: 'btn',
       onclick: () => {
         const n = downloads.enqueue(tracks);
-        toast(n ? `Saving ${n} track${n === 1 ? '' : 's'} to this device…` : 'Already saved');
+        toast(n ? `Saving ${n} song${n === 1 ? '' : 's'} for offline…` : 'Already saved for offline');
       },
-    }, iconSpan('download'), 'Save folder'));
+    }, iconSpan('download'), 'Save for offline'));
 
   show(crumbs,
-    fromCache && h('p', { class: 'banner inline' }, "Offline — showing this folder as it was last seen."),
+    fromCache && h('p', { class: 'banner inline' }, 'You’re offline. This is the folder as it was last time.'),
     (tracks.length || folders.length || extra.length) ? actions : null,
     folders.length ? folderList(pid, folders) : null,
     tracks.length ? trackList(tracks, { sub: () => '' }) : null,
-    !tracks.length && !folders.length ? message('Nothing here', p.emptyHint?.(folderId) || 'No folders or audio files in this folder.') : null);
+    !tracks.length && !folders.length ? message('This folder is empty', p.emptyHint?.(folderId) || 'No music or folders here.') : null);
   refreshRows();
 }
 
@@ -414,14 +414,14 @@ async function savedView(stale) {
   const total = list.reduce((s, t) => s + (t.size || 0), 0);
 
   const summary = h('p', { class: 'muted pad' },
-    `${list.length} track${list.length === 1 ? '' : 's'} · ${fmtBytes(total)}`,
+    `${list.length} song${list.length === 1 ? '' : 's'} · ${fmtBytes(total)}`,
     info.quota ? ` · ${fmtBytes(info.quota - info.usage)} free` : '');
 
   if (!list.length) {
-    return show(message('Nothing saved yet', store.settings.allowDownloads
-      ? 'Use the download buttons while browsing, or turn on "Save tracks as they play" in Settings.'
-      : 'Downloads are off, so nothing is stored on this device.',
-    h('a', { class: 'btn', href: hashFor.settings() }, 'Settings')));
+    return show(message('No songs saved yet', store.settings.allowDownloads
+      ? 'Tap the download button next to a song, or turn on “Save songs as they play” in Settings.'
+      : 'Offline listening is off, so no songs are saved on this device.',
+    h('a', { class: 'btn', href: hashFor.settings() }, 'Open settings')));
   }
 
   const del = (track) => h('button', {
@@ -436,7 +436,7 @@ async function savedView(stale) {
   });
 
   show(
-    !store.settings.allowDownloads && h('p', { class: 'banner inline' }, 'Downloads are off. These were saved earlier and still play offline.'),
+    !store.settings.allowDownloads && h('p', { class: 'banner inline' }, 'Offline listening is off. These songs were saved earlier and still play offline.'),
     summary,
     h('div', { class: 'actions' },
       h('button', { class: 'btn primary', onclick: () => player.playList(list, 0, { shuffle: false }) }, iconSpan('play'), 'Play all'),
@@ -448,10 +448,10 @@ async function savedView(stale) {
 
 async function confirmClearAll() {
   if (!store.savedIds.size) return;
-  if (!confirm(`Delete all ${store.savedIds.size} saved tracks from this device?`)) return;
+  if (!confirm(`Delete all ${store.savedIds.size} saved song${store.savedIds.size === 1 ? '' : 's'} from this device?`)) return;
   downloads.cancelAll();
   await store.clearAll();
-  toast('Deleted saved music');
+  toast('Deleted all saved songs');
   render();
 }
 
@@ -477,26 +477,26 @@ async function settingsView(stale) {
   if (stale()) return;
 
   const downloadsSection = h('section', { class: 'card' },
-    h('h2', {}, 'Downloads & storage'),
+    h('h2', {}, 'Offline listening'),
     settingToggle({
-      label: 'Allow downloads to this device',
+      label: 'Save songs on this device',
       desc: s.allowDownloads
-        ? 'On — you can save tracks and folders to play offline.'
-        : 'Off — music only streams. Nothing is saved on this device.',
+        ? 'On: you can save songs and folders to play without internet.'
+        : 'Off: songs stream from the cloud. Nothing is saved on this device.',
       checked: s.allowDownloads,
       onchange: async (on, input) => {
         if (on) {
           store.setSetting('allowDownloads', true);
           // Ask the browser to protect saved music from automatic cleanup (may show a prompt).
           const granted = await navigator.storage?.persist?.().catch(() => false);
-          toast(granted ? 'Downloads allowed · storage protected' : 'Downloads allowed');
+          toast(granted ? 'Offline listening on. Your browser will keep saved songs.' : 'Offline listening on');
         } else {
           store.setSetting('allowDownloads', false);
-          if (store.savedIds.size && confirm(`Also delete the ${store.savedIds.size} tracks already saved on this device?`)) {
+          if (store.savedIds.size && confirm(`Also delete the ${store.savedIds.size} song${store.savedIds.size === 1 ? '' : 's'} already saved on this device?`)) {
             await store.clearAll();
-            toast('Downloads off · saved music deleted');
+            toast('Offline listening off. Saved songs deleted.');
           } else {
-            toast('Downloads off');
+            toast('Offline listening off. Songs you already saved still play.');
           }
         }
         input.blur();
@@ -504,18 +504,18 @@ async function settingsView(stale) {
       },
     }),
     settingToggle({
-      label: 'Save tracks as they play',
-      desc: 'Keep a copy of every song you listen to, so it plays offline next time.',
+      label: 'Save songs as they play',
+      desc: 'Keeps a copy of each song you play, so it plays offline next time.',
       checked: s.allowDownloads && s.saveOnPlay,
       disabled: !s.allowDownloads,
       onchange: (on) => store.setSetting('saveOnPlay', on),
     }),
     h('div', { class: 'setting static' },
       h('span', { class: 'setting-text' },
-        h('span', { class: 'setting-label' }, `${store.savedIds.size} saved tracks`),
+        h('span', { class: 'setting-label' }, `${store.savedIds.size} saved song${store.savedIds.size === 1 ? '' : 's'}`),
         h('span', { class: 'setting-desc' },
-          `App storage used: ${fmtBytes(info.usage)}${info.quota ? ` of ${fmtBytes(info.quota)}` : ''}`,
-          s.allowDownloads ? ` · Protected from cleanup: ${info.persisted ? 'yes' : 'no'}` : '')),
+          `Using ${fmtBytes(info.usage)}${info.quota ? ` of ${fmtBytes(info.quota)}` : ''}`,
+          s.allowDownloads ? (info.persisted ? ' · Your browser will keep these' : ' · Your browser may clear these if space runs low') : '')),
       h('button', { class: 'btn danger', disabled: !store.savedIds.size, onclick: confirmClearAll }, 'Delete all')));
 
   const playbackSection = h('section', { class: 'card' },
@@ -523,16 +523,16 @@ async function settingsView(stale) {
     h('label', { class: 'setting' },
       h('span', { class: 'setting-text' },
         h('span', { class: 'setting-label' }, 'When the list ends'),
-        h('span', { class: 'setting-desc' }, 'Music keeps playing track after track. Choose what happens at the end.')),
+        h('span', { class: 'setting-desc' }, 'Music plays song after song. Choose what happens after the last one.')),
       h('select', {
         onchange: (e) => store.setSetting('repeat', e.target.value),
-      }, [['all', 'Start over'], ['off', 'Stop'], ['one', 'Repeat current track']].map(([v, t]) =>
+      }, [['all', 'Start over'], ['off', 'Stop'], ['one', 'Repeat the current song']].map(([v, t]) =>
         h('option', { value: v, selected: s.repeat === v }, t)))),
     h('label', { class: 'setting' },
       h('span', { class: 'setting-text' },
         h('span', { class: 'setting-label' }, 'Visualizer'),
         h('span', { class: 'setting-desc' },
-          'Also changes when you tap the display. Can interrupt background playback on some phones, so it starts off.')),
+          'You can also tap the display to switch. On some phones it can stop music playing in the background, so it starts off.')),
       h('select', { onchange: (e) => setVisMode(e.target.value) },
         [['off', 'Off'], ['bars', 'Spectrum bars'], ['scope', 'Oscilloscope']].map(([v, t]) =>
           h('option', { value: v, selected: s.visMode === v }, t)))));
@@ -544,9 +544,9 @@ async function settingsView(stale) {
       h('button', { class: 'btn primary big', onclick: generateAndApply }, iconSpan('dice'), 'Generate a skin'),
       h('a', { class: 'btn big', href: hashFor.studio() }, '✎ Skin Studio')),
     h('p', { class: 'setting-desc' },
-      'Each press mixes palettes from real classic skins in the ',
+      'Each press makes a new design from the colors of classic skins in the ',
       h('a', { href: 'https://skins.webamp.org/', target: '_blank', rel: 'noopener' }, 'Winamp Skin Museum'),
-      ' into a new design.'),
+      '.'),
     cur.inspiredBy?.length ? h('p', { class: 'setting-desc inspired' }, `“${cur.name}” is inspired by `,
       cur.inspiredBy.map((src, i) => [i ? ' + ' : '',
         h('a', { href: museumUrl(src.id), target: '_blank', rel: 'noopener' }, src.name)])) : null,
@@ -554,9 +554,9 @@ async function settingsView(stale) {
     h('div', { class: 'actions' },
       h('label', { class: 'btn' }, 'Load skin file…',
         h('input', { type: 'file', accept: '.json,.mbskin,application/json', hidden: true, onchange: loadSkinFile })),
-      h('button', { class: 'btn', onclick: downloadSkinTemplate }, 'Download skin template')),
+      h('button', { class: 'btn', onclick: downloadSkinTemplate }, 'Save skin as a file')),
     h('p', { class: 'setting-desc' },
-      'Make your own in the Skin Studio: colors, fonts, your own pictures, the player’s shape, artwork and effects. It starts from the current skin.'));
+      'Or make your own in the Skin Studio: change the colors, fonts, pictures, shape and effects, starting from your current skin.'));
 
   const accounts = h('section', { class: 'card' },
     h('h2', {}, 'Accounts'),
@@ -571,8 +571,8 @@ async function settingsView(stale) {
 
   const about = h('section', { class: 'card' },
     h('h2', {}, 'About'),
-    h('p', { class: 'muted' }, 'Music Box plays music straight from your Google Drive and Dropbox. ',
-      'It only ever asks for read-only access, and talks directly to those services — there is no server in between.'),
+    h('p', { class: 'muted' }, 'Music Box plays music from your Google Drive, your Dropbox or a folder on this device. ',
+      'It only asks to read your files, never to change them, and your sign-ins stay in this browser.'),
     h('div', { class: 'actions' },
       h('button', { class: 'btn danger', onclick: resetApp }, 'Reset app')));
 
@@ -631,7 +631,7 @@ async function generateAndApply() {
     useSkin(sk);
     const from = sk.inspiredBy.map((src) => src.name).join(' + ');
     genToast?.remove();
-    genToast = toast(`🎲 ${sk.name} — inspired by ${from}`, {
+    genToast = toast(`🎲 ${sk.name}, inspired by ${from}`, {
       timeout: 6000,
       action: {
         label: 'Undo',
@@ -644,7 +644,7 @@ async function generateAndApply() {
     });
     if (location.hash === hashFor.settings()) render();
   } catch (err) {
-    toast(`Couldn't generate a skin: ${err.message}`);
+    toast('Couldn’t make a new skin. Check your connection and try again.');
   } finally {
     generating = false;
   }
@@ -655,11 +655,11 @@ async function loadSkinFile(e) {
   e.target.value = '';
   if (!file) return;
   try {
-    if (file.size > 50_000) throw new Error('That file is too big to be a skin');
+    if (file.size > 50_000) throw new Error('That file is too big to be a skin file (50 KB at most)');
     const sk = parseSkinFile(await file.text());
     store.setSetting('customSkin', sk);
     useSkin(sk);
-    toast(`Skin "${sk.name}" loaded`);
+    toast(`Now using “${sk.name}”`);
     render();
   } catch (err) {
     toast(err.message);
@@ -691,7 +691,7 @@ function modal(...children) {
 
 async function openShareDialog({ pid, folderId, name, title, noDownload = true, withPictures = true }, { auto = false } = {}) {
   const p = getProvider(pid);
-  const t = toast(`Collecting songs in “${name}”…`, { timeout: 0 });
+  const t = toast(`Finding songs in “${name}”…`, { timeout: 0 });
   let tracks;
   try {
     tracks = await p.listRecursive(folderId, name);
@@ -700,15 +700,13 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
     return toast(err.message);
   }
   t.remove();
-  if (!tracks.length) return toast('There are no songs here to share');
+  if (!tracks.length) return toast('This folder has no songs to share');
   // Songs inside a folder picked with Dropbox's picker have no share link of their own.
   if (tracks.some((x) => /^pick:[^:]+:./.test(x.fileId))) {
     return modal(h('div', { class: 'modal-body' },
-      h('h2', {}, 'This folder can’t be shared as a record yet'),
-      h('p', {}, 'It was picked with Dropbox’s picker, which gives Music Box one link for the whole folder but none for the songs inside it, '
-        + 'and Music Box can’t make them: it can only reach its own app folder.'),
-      h('p', { class: 'setting-desc' }, 'To share these songs: pick the songs themselves with “Add music from Dropbox”, or copy the folder into '
-        + 'Dropbox → Apps → (your app’s folder).'),
+      h('h2', {}, 'This folder can’t be shared'),
+      h('p', {}, 'You added it with the old Dropbox picker, so Music Box can’t make share links for the songs inside it.'),
+      h('p', { class: 'setting-desc' }, 'To share it, open the same folder from Dropbox → Browse instead. Every folder there can be shared.'),
       h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: (e) => e.target.closest('dialog').close() }, 'OK'))));
   }
   const skin = currentSkin();
@@ -724,23 +722,22 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
     h('label', { class: 'field' }, h('span', {}, 'Title'), titleInput),
     h('label', { class: 'setting' },
       h('span', { class: 'setting-text' },
-        h('span', { class: 'setting-label' }, 'Disable downloads'),
-        h('span', { class: 'setting-desc' }, 'Listeners get no download or save buttons. A deterrent, not a lock: '
-          + 'someone technical could still save what their browser plays.')),
+        h('span', { class: 'setting-label' }, 'Turn off downloads'),
+        h('span', { class: 'setting-desc' }, 'Listeners won’t see download buttons. This discourages saving but can’t stop someone determined.')),
       lock),
     pictureCount > 0 && h('label', { class: 'setting' },
       h('span', { class: 'setting-text' },
         h('span', { class: 'setting-label' }, `Include my picture${pictureCount === 1 ? '' : 's'}`),
-        h('span', { class: 'setting-desc' }, `Your skin’s ${pictureCount === 1 ? 'picture is' : `${pictureCount} pictures are`} saved next to the songs `
-          + '(in a “Music Box pictures” folder) and shared by link with them. Pictures from web links travel as links.')),
+        h('span', { class: 'setting-desc' }, `Your skin’s ${pictureCount === 1 ? 'picture is' : `${pictureCount} pictures are`} saved to your ${where} `
+          + 'and shared along with the songs. Pictures you added from a web link are shared as that link.')),
       pics),
     h('p', { class: 'setting-desc' },
       `${Math.min(tracks.length, 300)} song${tracks.length === 1 ? '' : 's'} from ${where}`,
       tracks.length > 300 ? ' (the first 300)' : '',
       `, in your skin “${skin.name}”. `,
-      h('strong', {}, `These songs become viewable by anyone with the link in your ${where}`),
-      '; nothing else is shared. You can stop sharing any time in Settings → Shared records. '
-      + 'Only share music you have the right to share.'),
+      h('strong', {}, `Anyone with the link can open these songs in your ${where}.`),
+      ' Nothing else is shared, and you can stop sharing anytime in Settings → Shared records. '
+      + 'Only share music you have the rights to.'),
     status,
     h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'), go));
   const dlg = modal(body);
@@ -759,7 +756,7 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
           status.textContent = 'Making the link preview…';
           return makeCover({ deck: (popDoc || document).querySelector('.deck'), title: titleInput.value.trim() || name, count: Math.min(tracks.length, 300), skinName: skin.name });
         },
-        onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} / ${total}`; },
+        onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} of ${total}`; },
       });
       showShareResult(body, url, truncated);
     } catch (err) {
@@ -772,8 +769,8 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
             h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
               ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
               h('strong', {}, 'files.content.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
-            h('li', {}, 'Come back and press the button below. Dropbox asks you to approve, then your link is made.')),
-          h('p', { class: 'setting-desc' }, 'Music Box only ever writes into its own app folder, in “Music Box pictures”.'),
+            h('li', {}, 'Come back here and press Continue to Dropbox. After you approve, your link is made.')),
+          h('p', { class: 'setting-desc' }, 'Music Box only adds files to a “Music Box” folder in your Dropbox.'),
           h('div', { class: 'actions' },
             h('button', { class: 'btn', onclick: () => { pics.checked = false; go.click(); } }, 'Share without pictures'),
             h('button', {
@@ -790,8 +787,7 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
             h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
               ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
               h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
-            h('li', {}, 'Come back to this tab and press the button below. Dropbox asks you to approve, then brings you '
-              + 'back here and your link is made automatically.')),
+            h('li', {}, 'Come back here and press Continue to Dropbox. After you approve, Dropbox brings you back and your link is made.')),
           h('button', {
             class: 'btn primary',
             onclick: () => {
@@ -832,16 +828,15 @@ function dropboxPickHelp() {
 /** Explains the one-time Dropbox setting for sharing, with what Dropbox said if it refused. */
 function dropboxSharingHelp(detail, pending) {
   const dlg = modal(h('div', { class: 'modal-body' },
-    h('h2', {}, 'Dropbox didn\'t allow sharing yet'),
+    h('h2', {}, 'Dropbox hasn’t allowed sharing yet'),
     detail && h('p', { class: 'setting-desc' }, 'Dropbox said: ', h('em', {}, detail)),
-    h('p', {}, 'Your Dropbox app needs two permissions turned on. This is a one-time step:'),
+    h('p', {}, 'Turn on two permissions for your Dropbox app. You only do this once:'),
     h('ol', { class: 'steps' },
       h('li', {}, 'Open the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'), ' and click your app.'),
       h('li', {}, 'Go to the ', h('strong', {}, 'Permissions'), ' tab.'),
       h('li', {}, 'Tick ', h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'), '.'),
       h('li', {}, 'Click ', h('strong', {}, 'Submit'), ' at the bottom of the page.')),
-    h('p', { class: 'setting-desc' }, 'Then come back here and press “Try again”. You\'ll go to Dropbox to approve, '
-      + 'and come straight back with your link made.'),
+    h('p', { class: 'setting-desc' }, 'Then press Try again. Dropbox asks you to approve, then brings you back here and makes your link.'),
     h('div', { class: 'actions' },
       h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close'),
       pending && h('button', {
@@ -891,14 +886,14 @@ function showShareResult(body, url, truncated, { title = '', again = null, forwa
         copy.textContent = 'Copied ✓';
       } catch {
         field.select();
-        copy.textContent = 'Press Ctrl/⌘-C';
+        copy.textContent = 'Press Ctrl+C or ⌘C to copy';
       }
     },
   }, 'Copy link');
   const text = title ? `“${title}”: a record for you on Music Box` : 'A record for you on Music Box';
   const enc = encodeURIComponent;
   body.replaceChildren(
-    h('h2', {}, forwarding ? '⤴ Pass this record on' : again ? `⤴ Share “${title}”` : '✓ Your record is ready'),
+    h('h2', {}, forwarding ? '⤴ Share this record' : again ? `⤴ Share “${title}”` : '✓ Your record is ready'),
     h('p', { class: 'setting-desc' },
       forwarding ? 'Someone shared this with you. Anyone with the link can listen, no account needed.'
         : again ? 'You already made a link for this folder. Anyone with it can listen, no account needed.'
@@ -937,12 +932,12 @@ function recordsSection() {
         h('button', {
           class: 'btn danger',
           onclick: async () => {
-            if (!confirm(`Stop sharing “${r.title}”? The link stops working and its songs are no longer shared.`)) return;
+            if (!confirm(`Stop sharing “${r.title}”? The link will stop working, and its songs will no longer be shared.`)) return;
             try { await stopSharing(r.id); toast(`Stopped sharing “${r.title}”`); } catch (err) { toast(err.message, { timeout: 8000 }); }
             render();
           },
         }, 'Stop sharing'))))
-      : h('p', { class: 'setting-desc' }, 'Open a Google Drive collection or a Dropbox folder and press “⤴ Share as record” to send it to someone.'));
+      : h('p', { class: 'setting-desc' }, 'To share music, open a Google Drive or Dropbox folder and press “⤴ Share as record”, or press ⤴ on the player while it plays.'));
 }
 
 /** While a shared record is open, it's shown in the sender's skin; leaving restores your own. */
@@ -962,7 +957,7 @@ async function recordView(payload, stale) {
   try {
     rec = await openRecord(payload || '');
   } catch {
-    return show(message('This record link is damaged', 'Ask the sender to copy the link again.'));
+    return show(message('This record link doesn’t work', 'Part of the link may be missing. Ask the person who sent it to copy it again.'));
   }
   if (stale()) return;
   setTitle(rec.title);
@@ -1019,7 +1014,7 @@ async function recordView(payload, stale) {
         }, 'Keep this skin'))),
     rec.tracks.length
       ? trackList(rec.tracks, { sub: () => '', extra: dl })
-      : message('No songs', 'This record has no playable songs.'));
+      : message('No songs to play', 'The songs in this record aren’t available any more.'));
   refreshRows();
 }
 
@@ -1033,19 +1028,19 @@ async function connect(p) {
     location.hash = hashFor.folder(p.id, p.rootId, p.rootName);
     render();
   } catch (err) {
-    toast(err.message || 'Could not connect');
+    toast(err.message || 'Couldn’t connect. Try again.');
   }
 }
 
 async function disconnect(p) {
-  if (!confirm(`Disconnect ${p.label}? Music saved on this device stays until you delete it.`)) return;
+  if (!confirm(`Disconnect ${p.label}? Songs saved on this device stay until you delete them.`)) return;
   await p.disconnect();
   toast(`${p.label} disconnected`);
   render();
 }
 
 async function resetApp() {
-  if (!confirm('Sign out everywhere, delete all saved music and reset settings?')) return;
+  if (!confirm('Reset Music Box? This signs you out of every account, deletes saved songs and your own skins, and resets all settings.')) return;
   for (const p of Object.values(providers)) await p.disconnect().catch(() => {});
   await store.clearAll().catch(() => {});
   localStorage.clear();
@@ -1108,7 +1103,7 @@ function buildPlayerUi() {
           h('button', { class: 'tb-btn', id: 'btn-songs', title: 'Show the song list', 'aria-label': 'Show the song list', 'aria-expanded': 'false', onclick: () => toggleSongs() },
             h('span', { class: 'btn-ico', html: icons.library }), h('span', {}, 'SONGS')),
           h('button', { class: 'tb-btn', id: 'btn-share', title: 'Share what’s playing', 'aria-label': 'Share what’s playing', html: icons.share, onclick: sharePlaying }),
-          canPopOut() && h('button', { class: 'tb-btn', id: 'btn-popout', title: 'Pop out: float the player above other windows', 'aria-label': 'Pop out player', html: icons.popout, onclick: () => (popWin ? popIn() : popOut()) }),
+          canPopOut() && h('button', { class: 'tb-btn', id: 'btn-popout', title: 'Pop out the player into its own window', 'aria-label': 'Pop out player', html: icons.popout, onclick: () => (popWin ? popIn() : popOut()) }),
           h('button', { class: 'tb-btn', id: 'deck-close', 'aria-label': 'Close player', html: icons.down, onclick: closeFull }))),
       // Every part of the deck is a direct grid item, so skins can arrange them freely (see the
       // [data-deck] rules in css/app.css). Speakers and reels only show in the layouts that use them.
@@ -1116,7 +1111,7 @@ function buildPlayerUi() {
         h('span', { class: 'speaker spk-l', 'aria-hidden': 'true' }),
         h('div', { class: 'lcd screen' },
           h('span', { class: 'lcd-state', id: 'lcd-state', 'aria-hidden': 'true' }),
-          h('button', { class: 'lcd-time', id: 'lcd-time', title: 'Show elapsed / remaining time', onclick: toggleTimeMode }),
+          h('button', { class: 'lcd-time', id: 'lcd-time', title: 'Switch between time played and time left', onclick: toggleTimeMode }),
           h('span', { class: 'reel reel-l', 'aria-hidden': 'true' }),
           h('span', { class: 'reel reel-r', 'aria-hidden': 'true' }),
           h('canvas', { class: 'vis', id: 'viz', title: 'Tap to change the visualizer', onclick: cycleVisMode }),
@@ -1150,7 +1145,7 @@ function buildPlayerUi() {
         h('span', { class: 'tb-grip' }), h('span', { class: 'tb-label' }, 'PLAYLIST'), h('span', { class: 'tb-grip' }),
         h('span', { class: 'tb-tools' },
           h('button', {
-            class: 'tb-btn pl-fold', title: 'Fold the songs away', 'aria-label': 'Fold the song list', 'aria-expanded': 'true',
+            class: 'tb-btn pl-fold', title: 'Hide the song list', 'aria-label': 'Hide the song list', 'aria-expanded': 'true',
             onclick: () => toggleSongs(),
           }, h('span', { class: 'btn-ico', html: icons.down }), h('span', { class: 'fold-txt' }, 'HIDE')))),
       h('label', { class: 'pl-source' },
@@ -1202,7 +1197,7 @@ function updatePlayerUi() {
   $('#btn-repeat .btn-txt').textContent = s.repeat === 'one' ? 'REP 1' : 'REP';
   document.documentElement.toggleAttribute('data-playing', player.playing);
   $('#btn-repeat').classList.toggle('on', s.repeat !== 'off');
-  $('#btn-repeat').title = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' }[s.repeat];
+  $('#btn-repeat').title = { off: 'Repeat: off', all: 'Repeat: all songs', one: 'Repeat: this song' }[s.repeat];
   $('#flag-shuf').classList.toggle('lit', s.shuffle);
   $('#flag-rep').classList.toggle('lit', s.repeat !== 'off');
   $('#flag-rep').textContent = s.repeat === 'one' ? 'REP1' : 'REP';
@@ -1274,7 +1269,7 @@ function renderPlaylist() {
           h('span', { class: 'pl-num' }, `${i + 1}.`),
           h('span', { class: 'pl-name' }, track.name)))));
     if (!tracks.length) {
-      pl.append(h('li', { class: 'pl-empty' }, 'Playlist is empty. Choose a FOLDER above',
+      pl.append(h('li', { class: 'pl-empty' }, 'Nothing to play yet. Choose a folder above',
         wide.matches ? ', or open one in your library.' : ', or tap ⌄ (top right) to browse your music.'));
     }
   }
@@ -1287,7 +1282,7 @@ function renderPlaylist() {
   }
   $('#pl-foot').textContent = tracks.length
     ? `${qi + 1} / ${tracks.length}${tracks.length > 1000 ? ' (first 1000 shown)' : ''}${store.settings.shuffle ? ' · shuffled' : ''}`
-    : '0 tracks';
+    : '0 songs';
 }
 
 function updateTime() {
@@ -1359,7 +1354,7 @@ const isStage = () => Boolean(store.settings.stage) && wide.matches && !popWin;
 function setStage(on) {
   store.setSetting('stage', on);
   applyStage();
-  toast(on ? 'Stage mode: open your music with the Library button (or press L)' : 'Stage mode off', { timeout: 2500 });
+  toast(on ? 'Stage mode on. Press Library (or L) to see your music.' : 'Stage mode off', { timeout: 2500 });
 }
 
 function applyStage() {
@@ -1441,7 +1436,7 @@ async function popOut() {
       ? await window.documentPictureInPicture.requestWindow({ width, height, preferInitialWindowPlacement: true })
       : window.open('', 'music-box-player', `popup,width=${width},height=${height}`);
   } catch (err) {
-    toast(`Couldn't pop out the player: ${err.message}`);
+    toast('Couldn’t pop out the player. Try again, or use stage mode (F).');
     return;
   }
   if (!win) {
@@ -1533,7 +1528,7 @@ function updatePopButton() {
   const btn = $('#btn-popout');
   if (!btn) return;
   btn.innerHTML = popWin ? icons.popin : icons.popout;
-  btn.title = popWin ? 'Put the player back in the page' : 'Pop out: float the player above other windows';
+  btn.title = popWin ? 'Put the player back in the page' : 'Pop out the player into its own window';
 }
 
 /**
@@ -1642,17 +1637,17 @@ wide.addEventListener('change', () => { syncViz(); updatePlayerUi(); });
 player.addEventListener('time', updateTime);
 player.addEventListener('auth-required', (e) => {
   const p = getProvider(e.detail.providerId);
-  toast(`${p.label} needs you to sign in again`, {
+  toast(`Sign in to ${p.label} again to keep playing`, {
     timeout: 0,
-    action: { label: 'Reconnect', run: () => p.reconnect().then(() => player.toggle()).catch((err) => toast(err.message)) },
+    action: { label: 'Sign in', run: () => p.reconnect().then(() => player.toggle()).catch((err) => toast(err.message)) },
   });
 });
-player.addEventListener('track-error', (e) => toast(`Skipped "${e.detail.track.name}": ${e.detail.error.message}`));
+player.addEventListener('track-error', (e) => toast(`Skipped “${e.detail.track.name}”: ${e.detail.error.message}`));
 
 store.events.addEventListener('saved', () => { refreshRows(); updatePlayerUi(); });
 downloads.downloads.addEventListener('change', () => { refreshRows(); updatePlayerUi(); });
 downloads.downloads.addEventListener('error', (e) =>
-  toast(`Couldn't save "${e.detail.track.name}": ${e.detail.error.message}`));
+  toast(`Couldn’t save “${e.detail.track.name}”: ${e.detail.error.message}`));
 
 // Google sign-in tokens only last an hour; refresh during real clicks so long sessions continue.
 document.addEventListener('click', () => {
@@ -1697,7 +1692,7 @@ window.addEventListener('hashchange', render);
 async function switchDropboxApp() {
   const { dropbox } = providers;
   if (dropbox.needsReconnect()) {
-    toast('Dropbox: Music Box now has read-only access to your whole Dropbox. Reconnect once to keep playing.', {
+    toast('Music Box has a new Dropbox connection that can read your whole Dropbox. Reconnect once to keep playing.', {
       timeout: 0,
       action: { label: 'Reconnect', run: () => dropbox.reconnectFromAppFolder() },
     });
@@ -1712,7 +1707,7 @@ async function switchDropboxApp() {
     if (!moved.size) return;
     store.setSetting('pins', pins().map((f) => (f.pid === 'dropbox' && moved.has(f.id) ? { ...f, id: moved.get(f.id) } : f)));
     moveRecordSources('dropbox', moved);
-    toast(moved.size === 1 ? 'Updated 1 Dropbox folder to its new place' : `Updated ${moved.size} Dropbox folders to their new place`);
+    toast(moved.size === 1 ? 'Updated 1 pinned Dropbox folder to its new location' : `Updated ${moved.size} pinned Dropbox folders to their new location`);
     updatePlayerUi();
     render();
   } catch (err) {
@@ -1736,8 +1731,8 @@ async function start() {
   requestAnimationFrame(() => paintSkinArt(currentSkin()));
   await store.init();
   if (store.isBlocked()) {
-    toast('Music Box is open in another tab or window. Close the others so this one can save pictures and music.', { timeout: 9000 });
-    store.events.addEventListener('db-ready', () => toast('All set: this tab can save again'), { once: true });
+    toast('Music Box is open in another tab or window. Close the others so this tab can save songs and pictures.', { timeout: 9000 });
+    store.events.addEventListener('db-ready', () => toast('This tab can save songs and pictures again'), { once: true });
   }
   await providers.local.init().catch(() => {});
   let cameBack = false; // back from a Dropbox sign-in page

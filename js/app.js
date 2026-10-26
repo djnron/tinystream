@@ -4,7 +4,7 @@ import { Player } from './player.js';
 import { getProvider, providers, registerHidden } from './providers/index.js';
 import { createRecord, downloadUrl, moveRecordSources, myRecords, openRecord, recordUrl, sharedSource, stopSharing } from './share.js';
 import * as store from './store.js';
-import { AuthRequiredError, extOf, fmtBytes, h, isNetworkError, toast } from './util.js';
+import { AuthRequiredError, extOf, fmtBytes, h, IS_IOS, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
 import { paint as paintSkinArt, repaint as repaintSkinArt, setOtherDocument } from './skin-art.js';
 import { generateSkin, museumUrl } from './skin-generator.js';
@@ -532,7 +532,7 @@ async function settingsView(stale) {
       h('span', { class: 'setting-text' },
         h('span', { class: 'setting-label' }, 'Visualizer'),
         h('span', { class: 'setting-desc' },
-          'You can also tap the display to switch. On some phones it can stop music playing in the background, so it starts off.')),
+          IS_IOS ? 'You can also tap the display to switch. On iPhone it’s a light show that moves with the music, so songs keep playing when the screen locks.' : 'You can also tap the display to switch. On some phones it can stop music playing in the background, so it starts off.')),
       h('select', { onchange: (e) => setVisMode(e.target.value) },
         [['off', 'Off'], ['bars', 'Spectrum bars'], ['scope', 'Oscilloscope']].map(([v, t]) =>
           h('option', { value: v, selected: s.visMode === v }, t)))));
@@ -1311,7 +1311,7 @@ function setVisMode(mode) {
   store.setSetting('visMode', mode);
   if (mode !== 'off') {
     visualizer.attach(player.audio);
-    if (wasOff) toast('Visualizer on. If music stops in the background on your phone, turn it off.');
+    if (wasOff) toast(IS_IOS ? 'Visualizer on. On iPhone it’s a light show, so music keeps playing when the screen locks.' : 'Visualizer on. If music stops in the background on your phone, turn it off.');
   }
   updatePlayerUi();
 }

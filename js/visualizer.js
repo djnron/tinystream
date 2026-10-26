@@ -2,13 +2,26 @@
 // It needs the audio routed through Web Audio, which can stop background playback on some
 // phones, so it starts switched off and the user turns it on (tap the display or use Settings).
 // Once attached, the audio element stays routed through the AudioContext until reload.
+//
+// On iPhone and iPad the audio is never routed through Web Audio: iOS freezes it when the screen
+// locks, which leaves the song "playing" in silence. There the visualizer is a light show that
+// moves while music plays, instead of reacting to the sound itself.
 
+import { IS_IOS } from './util.js';
+
+let simAudio = null; // iOS: the audio element, to know when music is playing
 let ctx;
 let analyser;
 let freq;
 let wave;
 
 export function attach(audio) {
+  if (IS_IOS) {
+    simAudio = audio;
+    freq ??= new Uint8Array(512);
+    wave ??= new Uint8Array(1024);
+    return;
+  }
   if (ctx) return;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
@@ -25,6 +38,21 @@ export function attach(audio) {
 }
 
 export const isAttached = () => Boolean(ctx);
+
+/** iOS light show: a lively, music-like spectrum and wave that pulse at about 120 beats a minute. */
+function simulate(t) {
+  const beat = 0.7 + 0.3 * Math.max(0, Math.sin(t * Math.PI * 4)) ** 3;
+  for (let j = 0; j < freq.length; j++) {
+    const base = 235 * Math.exp(-j / 140);
+    const wobble = 0.55 + 0.45 * Math.sin(t * (1.7 + (j % 7) * 0.45) + j * 0.37) * Math.sin(t * 1.1 + j * 0.05);
+    freq[j] = Math.max(0, Math.min(255, base * wobble * beat + Math.random() * 18));
+  }
+  for (let i = 0; i < wave.length; i++) {
+    const x = i / wave.length;
+    const v = Math.sin(x * 6.28 * 3 + t * 5) * 0.5 + Math.sin(x * 6.28 * 7 - t * 3) * 0.25;
+    wave[i] = 128 + v * 90 * beat;
+  }
+}
 
 const PIXEL = 3; // CSS pixels per "LCD pixel"
 
@@ -61,10 +89,12 @@ export function run(canvas, getMode) {
     }
     g.clearRect(0, 0, w, h);
     const mode = getMode();
-    const live = Boolean(analyser) && mode !== 'off';
+    const sim = !analyser && simAudio && !simAudio.paused && mode !== 'off';
+    if (sim) simulate(performance.now() / 1000);
+    const live = (Boolean(analyser) || sim) && mode !== 'off';
 
     if (mode === 'scope') {
-      if (live) analyser.getByteTimeDomainData(wave);
+      if (live && analyser) analyser.getByteTimeDomainData(wave);
       g.fillStyle = colors.high;
       for (let x = 0; x < w; x++) {
         const sample = live ? (wave[Math.floor((x / w) * wave.length)] - 128) / 128 : 0;
@@ -78,7 +108,7 @@ export function run(canvas, getMode) {
     // picks how they're drawn: solid bars, mirrored from the middle, LED blocks, or just dots.
     const style = document.documentElement.dataset.vis || 'bars';
     const bars = Math.max(4, Math.floor((w + 1) / 4));
-    if (live) analyser.getByteFrequencyData(freq);
+    if (live && analyser) analyser.getByteFrequencyData(freq);
     const usable = freq ? Math.floor(freq.length * 0.7) : 0;
     const grad = g.createLinearGradient(0, h, 0, 0);
     grad.addColorStop(0, colors.low);

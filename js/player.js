@@ -9,7 +9,7 @@
 
 import { getProvider } from './providers/index.js';
 import * as store from './store.js';
-import { AuthRequiredError, isNetworkError } from './util.js';
+import { AuthRequiredError, IS_IOS, isNetworkError } from './util.js';
 
 const MAX_SKIPS = 5; // consecutive failures before giving up
 
@@ -18,7 +18,11 @@ export class Player extends EventTarget {
     super();
     this.audio = new Audio();
     this.audio.preload = 'auto';
-    this.audio.crossOrigin = 'anonymous'; // streamed songs come from Dropbox/Google; the visualizer needs CORS
+    // Streamed songs come from Dropbox/Google; the visualizer reads them through Web Audio, which needs
+    // CORS. iOS never uses Web Audio here (see visualizer.js), so it plays them as ordinary media.
+    if (!IS_IOS) this.audio.crossOrigin = 'anonymous';
+    // Safari 17+: this is a music player, so keep playing with the screen locked or the phone on silent.
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* older browsers */ }
     this.audio.volume = store.settings.volume;
     this.queue = []; // tracks in their original order
     this.order = []; // indices into queue, in play order (shuffled or not)
@@ -278,6 +282,9 @@ export class Player extends EventTarget {
       const s = await provider.streamUrl(track);
       if (!s) return null;
       if (!s.headers) return s.url;
+      // iOS may pause the service worker when the screen locks, which would stall a song mid-way,
+      // so there songs that need it (Google Drive) download whole instead.
+      if (IS_IOS) return null;
       const worker = navigator.serviceWorker?.controller;
       if (!worker) return null;
       const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;

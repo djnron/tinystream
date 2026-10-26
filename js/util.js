@@ -120,3 +120,10 @@ export function base64Url(buffer) {
 export function isNetworkError(err) {
   return err instanceof TypeError || !navigator.onLine;
 }
+
+/**
+ * iPhone and iPad (iPadOS reports itself as a Mac with a touch screen). iOS freezes the page's audio
+ * processing when the screen locks, so anything routed through Web Audio goes silent there.
+ */
+export const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

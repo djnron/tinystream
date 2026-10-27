@@ -2,7 +2,7 @@ import * as downloads from './downloads.js';
 import { icons } from './icons.js';
 import { Player } from './player.js';
 import { getProvider, providers, registerHidden } from './providers/index.js';
-import { createRecord, downloadUrl, moveRecordSources, myRecords, openRecord, recordUrl, sharedSource, stopSharing } from './share.js';
+import { createRecord, downloadUrl, moveRecordSources, myRecords, openRecord, openShortCode, recordUrl, sharedSource, shortCode, stopSharing } from './share.js';
 import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, IS_IOS, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
@@ -72,8 +72,9 @@ async function render() {
   back.onclick = () => { location.hash = parentHash(route); };
   const stale = () => seq !== renderSeq;
 
-  if (EMBED && route[0] !== 'r') return show(message('Nothing to play here', 'This embed needs a record link. Make one with ⤴ Share as record, then press Embed.'));
-  restoreOwnSkin(route[0] === 'r');
+  if (EMBED && route[0] !== 'r' && route[0] !== 's') return show(message('Nothing to play here', 'This embed needs a record link. Make one with ⤴ Share as record, then press Embed.'));
+  restoreOwnSkin(route[0] === 'r' || route[0] === 's');
+  if (route[0] === 's') return shortRecordView(location.hash.replace(/^#\/s\//, ''), stale);
   if (route[0] === 'r') return recordView(route[1], stale);
   if (route[0] === 'b') return browseView(route[1], route[2], route[3], stale);
   if (route[0] === 'saved') return savedView(stale);
@@ -955,7 +956,9 @@ function embedBuilder(recordLink, title) {
   const sizes = { full: { label: 'Player and songs', height: 560 }, compact: { label: 'Player only', height: 300 } };
   let size = 'full';
   let fit = true;
-  const code = h('textarea', { class: 'embed-code', readonly: true, rows: 4, spellcheck: false, 'aria-label': 'Embed code', onfocus: (e) => e.target.select() });
+  let short = null; // the record's short code, once made
+  const code = h('textarea', { class: 'embed-code', readonly: true, rows: 3, spellcheck: false, 'aria-label': 'Embed code', onfocus: (e) => e.target.select() });
+  const note = h('p', { class: 'setting-desc' });
   const preview = h('div', { class: 'embed-preview' });
   const copy = h('button', {
     class: 'btn primary',
@@ -964,17 +967,38 @@ function embedBuilder(recordLink, title) {
     },
   }, 'Copy code');
   const update = () => {
-    const src = embedSrc(recordLink, size);
+    const long = embedSrc(recordLink, size);
+    const u = new URL(long);
+    const src = short ? `${u.origin}${u.pathname}?embed=${size}#/s/${short}` : long;
     const name = (title || 'A record').replace(/"/g, '&quot;');
-    const frame = `<iframe src="${src}" width="100%" height="${sizes[size].height}" style="max-width:480px;border:0;border-radius:10px" `
-      + `allow="autoplay; encrypted-media" loading="lazy" title="${name} · Music Box"></iframe>`;
-    const script = fit ? `\n<script src="${new URL(src).origin}${new URL(src).pathname}embed.js" async></script>` : '';
-    code.value = frame + script;
+    const frame = `<iframe src="${src}" width="100%" height="${sizes[size].height}" style="max-width:480px;border:0" title="${name}"></iframe>`;
+    code.value = frame + (fit ? `<script src="${u.origin}${u.pathname}embed.js" async></script>` : '');
     copy.textContent = 'Copy code';
     preview.replaceChildren(h('iframe', { src, title: 'Preview', loading: 'lazy', style: `height:${sizes[size].height}px` }));
   };
   const choice = (key) => h('label', { class: 'embed-choice' },
     h('input', { type: 'radio', name: 'embed-size', checked: key === size, onchange: () => { size = key; update(); } }), sizes[key].label);
+  // Make (or reuse) the short code; until then, and if it can't be made, the full-length code works too.
+  copy.disabled = true;
+  note.textContent = 'Making a short code…';
+  shortCode(recordLink).then((c) => {
+    short = c;
+    if (c) { note.textContent = ''; return; }
+    const { dropbox } = providers;
+    if (dropbox.isConnected() && !dropbox.canUploadPictures()) {
+      // A short code is one small file saved in Dropbox, which needs Dropbox's "save files" permission.
+      note.replaceChildren(
+        'This code is long because the whole record is in it. For a short one, Music Box saves one small file in your Dropbox. ',
+        'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
+        ', tick ', h('strong', {}, 'files.content.write'), ' on your app’s Permissions tab and press Submit. Then: ',
+        h('button', { class: 'link', onclick: () => dropbox.connect({ sharing: true, pictures: true, back: hashFor.settings() }) }, 'Allow in Dropbox'),
+        ', and press Embed again in Settings → Shared records.');
+    } else {
+      note.textContent = 'This code is long because the whole record is in it. For a short one, connect Google Drive and press Embed again.';
+    }
+  }).catch((err) => {
+    note.textContent = `Couldn’t make a short code (${err.message}), so this code is the long version. It works the same.`;
+  }).finally(() => { copy.disabled = false; update(); });
   update();
   return h('div', { class: 'embed-builder' },
     h('p', { class: 'setting-desc' }, 'Paste this code into your website (an HTML or embed block) to show this record as a player. Visitors press Play to listen. No account needed.'),
@@ -983,6 +1007,7 @@ function embedBuilder(recordLink, title) {
       h('input', { type: 'checkbox', checked: fit, onchange: (e) => { fit = e.target.checked; update(); } }),
       'Fit the height to the player (adds one script line)'),
     code,
+    note,
     h('div', { class: 'actions' }, copy),
     h('p', { class: 'setting-desc' }, 'Preview'),
     preview);
@@ -1047,6 +1072,19 @@ function restoreOwnSkin(stayingOnRecord) {
   recordSkin = null;
   applySkin(currentSkin());
   requestAnimationFrame(() => paintSkinArt(currentSkin()));
+}
+
+/** A record opened by its short code (embeds): fetch the record's data, then show it as usual. */
+async function shortRecordView(code, stale) {
+  show(h('p', { class: 'muted pad' }, 'Opening record…'));
+  let payload;
+  try {
+    payload = await openShortCode(code);
+  } catch (err) {
+    return show(message('This record isn’t available', err.message));
+  }
+  if (stale()) return;
+  return recordView(payload, stale);
 }
 
 async function recordView(payload, stale) {

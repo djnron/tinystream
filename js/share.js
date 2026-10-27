@@ -278,6 +278,66 @@ export function moveRecordSources(pid, moved) {
   saveRecords(myRecords().map((r) => (r.source?.pid === pid && moved.has(r.source.id) ? { ...r, source: { pid, id: moved.get(r.source.id) } } : r)));
 }
 
+// ---------- short codes (for embeds) ----------
+//
+// A record link carries everything after "#", which makes embed code long. A short code saves that
+// same record data as a small file next to the songs, shared by link like them, and the embed only
+// carries the file's id. Stop sharing turns the file off with the songs, so embeds stop too.
+
+const PAYLOAD = /^[zj][A-Za-z0-9_-]{4,200000}$/;
+
+/**
+ * The record's short code ("g<drive id>[.<resource key>]" or "d<dropbox path>"), made once and
+ * remembered. Returns null when there's nowhere to save it without asking for a new permission.
+ */
+export async function shortCode(recordUrl) {
+  const list = myRecords();
+  const rec = list.find((r) => r.url === recordUrl);
+  if (!rec) return null; // someone else's record: only its sender can make a short code
+  if (rec.short) return rec.short;
+  const payload = recordUrl.split('#/r/')[1];
+  if (!payload || !PAYLOAD.test(payload)) return null;
+  const blob = new Blob([payload], { type: 'text/plain' });
+  const name = `record-${rec.id}.txt`;
+  const drive = getProvider('gdrive');
+  const dropbox = getProvider('dropbox');
+  let short;
+  let item;
+  if (rec.source?.pid !== 'gdrive' && dropbox?.isConnected() && dropbox.canUploadPictures()) {
+    const up = await dropbox.uploadPicture(blob, name);
+    const ref = dropboxPath(up.url);
+    short = `d${ref}`;
+    item = { src: 'd', ref, url: up.url };
+  } else if (drive?.isConnected()) {
+    const up = await drive.uploadPicture(blob, name);
+    short = `g${up.ref}${up.key ? `.${up.key}` : ''}`;
+    item = { src: 'g', ref: up.ref };
+  } else {
+    return null;
+  }
+  saveRecords(myRecords().map((r) => (r.id === rec.id ? { ...r, short, items: [...r.items, item] } : r)));
+  return short;
+}
+
+/** Fetches a record's data from its short code, without any account. */
+export async function openShortCode(code) {
+  let res;
+  if (code[0] === 'g') {
+    const [id, key] = code.slice(1).split('.');
+    if (!DRIVE_ID.test(id)) throw new Error('This embed code is damaged');
+    const headers = key && /^[\w-]{1,100}$/.test(key) ? { 'X-Goog-Drive-Resource-Keys': `${id}/${key}` } : {};
+    res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&key=${encodeURIComponent(CONFIG.googleApiKey)}`, { headers });
+  } else if (code[0] === 'd' && DROPBOX_PATH.test(code.slice(1))) {
+    res = await fetch(`https://dl.dropboxusercontent.com${code.slice(1)}`);
+  } else {
+    throw new Error('This embed code is damaged');
+  }
+  if (!res.ok) throw new Error(res.status === 404 || res.status === 403 ? 'The sender stopped sharing this record' : `Couldn’t load this record (error ${res.status})`);
+  const payload = (await res.text()).trim();
+  if (!PAYLOAD.test(payload)) throw new Error('This embed code is damaged');
+  return payload;
+}
+
 export function myRecords() {
   try {
     return JSON.parse(localStorage.getItem(RECORDS_KEY)) || [];

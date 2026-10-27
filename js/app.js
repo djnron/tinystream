@@ -21,6 +21,13 @@ registerHidden(sharedSource);
 // player, in the record's skin. No library, no sign-ins, no offline saving.
 const EMBED = new URLSearchParams(location.search).get('embed');
 if (EMBED) document.body.classList.add('embed', EMBED === 'compact' ? 'embed-compact' : 'embed-full');
+
+// One player at a time: when this one starts, other Music Box players pause. That covers several
+// embeds on one web page (they share a channel) and Music Box open in several tabs.
+const thisPlayer = Math.random().toString(36).slice(2);
+const onePlayer = 'BroadcastChannel' in window ? new BroadcastChannel('music-box-playing') : null;
+player.audio.addEventListener('play', () => onePlayer?.postMessage(thisPlayer));
+if (onePlayer) onePlayer.onmessage = (e) => { if (e.data !== thisPlayer && player.playing) player.toggle(); };
 // The pop-out player window, when the deck has been popped out of the page (see "stage mode and pop-out").
 let popWin = null;
 let popDoc = null;

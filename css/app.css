@@ -1609,3 +1609,58 @@ body:not(.has-track) #toasts { bottom: calc(88px + var(--safe-b)); }
   .pic-where { flex-basis: 100%; order: 3; }
   .pic-top .icon-btn { margin-left: auto; }
 }
+
+/* ---------- embedded on another website (?embed=full | compact) ---------- */
+
+body.embed { min-height: 0; background: var(--bg); }
+body.embed .topbar, body.embed main, body.embed #mini, body.embed .fab, body.embed #offline,
+body.embed #btn-stage, body.embed #btn-popout, body.embed #btn-songs, body.embed #deck-close,
+body.embed .pl-fold, body.embed .pl-source, body.embed .deck-save { display: none !important; }
+body.embed .layout { display: block; max-width: none; padding: 0; }
+body.embed #full {
+  display: flex !important;
+  position: static;
+  inset: auto;
+  max-height: none;
+  padding: 8px;
+  overflow: visible;
+  background: none;
+  flex-direction: column;
+  gap: 8px;
+}
+body.embed #full > .window { width: 100%; max-width: none; margin: 0; }
+body.embed .playlist { flex: none; }
+body.embed .pl { min-height: 120px; max-height: 300px; }
+body.embed.embed-compact .playlist { display: none; }
+body.embed #toasts { bottom: 8px; }
+.embed-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 2px 4px;
+  color: var(--muted);
+  font: 600 var(--fs-xs)/1.4 var(--font-ui);
+  text-decoration: none;
+}
+.embed-foot:hover { color: var(--text); }
+.embed-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.embed-brand { flex: none; letter-spacing: 0.08em; }
+
+/* the embed code builder in the share screen */
+.embed-panel { display: grid; gap: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+.embed-builder { display: grid; gap: var(--sp-2); }
+.embed-choices { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.embed-choice { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); cursor: pointer; }
+.embed-code {
+  width: 100%;
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: var(--sunken);
+  font: var(--fs-xs)/1.4 var(--font-lcd);
+  resize: vertical;
+}
+.embed-preview iframe { display: block; width: 100%; max-width: 480px; border: 0; border-radius: 10px; background: #0003; }
+.modal:has(.embed-panel:not([hidden])) { width: min(94vw, 560px); }

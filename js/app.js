@@ -16,6 +16,11 @@ import * as visualizer from './visualizer.js';
 
 const player = new Player();
 registerHidden(sharedSource);
+
+// Embedded on another website (a record's embed code, ?embed=full or ?embed=compact): only the
+// player, in the record's skin. No library, no sign-ins, no offline saving.
+const EMBED = new URLSearchParams(location.search).get('embed');
+if (EMBED) document.body.classList.add('embed', EMBED === 'compact' ? 'embed-compact' : 'embed-full');
 // The pop-out player window, when the deck has been popped out of the page (see "stage mode and pop-out").
 let popWin = null;
 let popDoc = null;
@@ -60,6 +65,7 @@ async function render() {
   back.onclick = () => { location.hash = parentHash(route); };
   const stale = () => seq !== renderSeq;
 
+  if (EMBED && route[0] !== 'r') return show(message('Nothing to play here', 'This embed needs a record link. Make one with ⤴ Share as record, then press Embed.'));
   restoreOwnSkin(route[0] === 'r');
   if (route[0] === 'r') return recordView(route[1], stale);
   if (route[0] === 'b') return browseView(route[1], route[2], route[3], stale);
@@ -758,7 +764,7 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
         },
         onProgress: (n, total) => { status.textContent = `Sharing songs… ${n} of ${total}`; },
       });
-      showShareResult(body, url, truncated);
+      showShareResult(body, url, truncated, { title: titleInput.value.trim() || name });
     } catch (err) {
       go.disabled = false;
       const pending = () => ({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked, withPictures: pics.checked });
@@ -876,7 +882,7 @@ function sharePlaying() {
   return openShareDialog({ pid: src.pid, folderId: src.id, name: src.name });
 }
 
-function showShareResult(body, url, truncated, { title = '', again = null, forwarding = false } = {}) {
+function showShareResult(body, url, truncated, { title = '', again = null, forwarding = false, existing = false, openEmbed = false } = {}) {
   const field = h('input', { type: 'text', readonly: true, value: url, 'aria-label': 'Record link', onfocus: (e) => e.target.select() });
   const copy = h('button', {
     class: 'btn primary',
@@ -892,8 +898,17 @@ function showShareResult(body, url, truncated, { title = '', again = null, forwa
   }, 'Copy link');
   const text = title ? `“${title}”: a record for you on Music Box` : 'A record for you on Music Box';
   const enc = encodeURIComponent;
+  const embedPanel = h('div', { class: 'embed-panel', hidden: !openEmbed });
+  if (openEmbed) embedPanel.append(embedBuilder(url, title));
+  const embedBtn = h('button', {
+    class: 'btn',
+    onclick: () => {
+      if (!embedPanel.firstChild) embedPanel.append(embedBuilder(url, title));
+      embedPanel.hidden = !embedPanel.hidden;
+    },
+  }, '</> Embed');
   body.replaceChildren(
-    h('h2', {}, forwarding ? '⤴ Share this record' : again ? `⤴ Share “${title}”` : '✓ Your record is ready'),
+    h('h2', {}, forwarding ? '⤴ Share this record' : (again || existing) ? `⤴ Share “${title}”` : '✓ Your record is ready'),
     h('p', { class: 'setting-desc' },
       forwarding ? 'Someone shared this with you. Anyone with the link can listen, no account needed.'
         : again ? 'You already made a link for this folder. Anyone with it can listen, no account needed.'
@@ -906,10 +921,80 @@ function showShareResult(body, url, truncated, { title = '', again = null, forwa
       h('a', { class: 'btn', href: `mailto:?subject=${enc(text)}&body=${enc(`${text}\n\n${url}`)}` }, 'Email'),
       h('a', { class: 'btn', href: `sms:?&body=${enc(`${text} ${url}`)}` }, 'Message'),
       h('a', { class: 'btn', href: `https://wa.me/?text=${enc(`${text} ${url}`)}`, target: '_blank', rel: 'noopener' }, 'WhatsApp'),
-      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open')),
+      h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener' }, 'Open'),
+      embedBtn),
+    embedPanel,
     h('div', { class: 'actions' },
       again && h('button', { class: 'btn', onclick: again }, 'Make a new link'),
       h('button', { class: 'btn', onclick: () => body.closest('dialog').close() }, 'Done')));
+}
+
+// ---------------------------------------------------------------- embedding a record on a website
+
+/** The same record as a full Music Box page (for "Open in Music Box" inside an embed). */
+function fullPageUrl() {
+  return `${location.origin}${location.pathname}${location.hash}`;
+}
+
+/** The embed address for a record link: the app's own page with ?embed=…, and the record after "#". */
+function embedSrc(recordLink, size) {
+  const u = new URL(recordLink);
+  const base = u.pathname === '/r' ? '/' : u.pathname; // link-preview links (/r?c=…) live at the root
+  return `${u.origin}${base}?embed=${size}${u.hash}`;
+}
+
+/** Embed code, size choices and a live preview, for the share screen. */
+function embedBuilder(recordLink, title) {
+  const sizes = { full: { label: 'Player and songs', height: 560 }, compact: { label: 'Player only', height: 300 } };
+  let size = 'full';
+  let fit = true;
+  const code = h('textarea', { class: 'embed-code', readonly: true, rows: 4, spellcheck: false, 'aria-label': 'Embed code', onfocus: (e) => e.target.select() });
+  const preview = h('div', { class: 'embed-preview' });
+  const copy = h('button', {
+    class: 'btn primary',
+    onclick: async () => {
+      try { await navigator.clipboard.writeText(code.value); copy.textContent = 'Copied ✓'; } catch { code.select(); copy.textContent = 'Press Ctrl+C or ⌘C to copy'; }
+    },
+  }, 'Copy code');
+  const update = () => {
+    const src = embedSrc(recordLink, size);
+    const name = (title || 'A record').replace(/"/g, '&quot;');
+    const frame = `<iframe src="${src}" width="100%" height="${sizes[size].height}" style="max-width:480px;border:0;border-radius:10px" `
+      + `allow="autoplay; encrypted-media" loading="lazy" title="${name} · Music Box"></iframe>`;
+    const script = fit ? `\n<script src="${new URL(src).origin}${new URL(src).pathname}embed.js" async></script>` : '';
+    code.value = frame + script;
+    copy.textContent = 'Copy code';
+    preview.replaceChildren(h('iframe', { src, title: 'Preview', loading: 'lazy', style: `height:${sizes[size].height}px` }));
+  };
+  const choice = (key) => h('label', { class: 'embed-choice' },
+    h('input', { type: 'radio', name: 'embed-size', checked: key === size, onchange: () => { size = key; update(); } }), sizes[key].label);
+  update();
+  return h('div', { class: 'embed-builder' },
+    h('p', { class: 'setting-desc' }, 'Paste this code into your website (an HTML or embed block) to show this record as a player. Visitors press Play to listen. No account needed.'),
+    h('div', { class: 'embed-choices' }, choice('full'), choice('compact')),
+    h('label', { class: 'embed-choice' },
+      h('input', { type: 'checkbox', checked: fit, onchange: (e) => { fit = e.target.checked; update(); } }),
+      'Fit the height to the player (adds one script line)'),
+    code,
+    h('div', { class: 'actions' }, copy),
+    h('p', { class: 'setting-desc' }, 'Preview'),
+    preview);
+}
+
+/** Inside an embed: the record's name and a way to open it in the full app. */
+function embedFooter(rec) {
+  full.querySelector('.embed-foot')?.remove();
+  full.append(h('a', { class: 'embed-foot', href: fullPageUrl(), target: '_blank', rel: 'noopener' },
+    h('span', { class: 'embed-title' }, rec.title),
+    h('span', { class: 'embed-brand' }, 'Music Box ↗')));
+}
+
+/** Tells the page around an embed how tall the player is (used by embed.js to fit the frame). */
+function reportEmbedSize() {
+  if (window.parent === window) return;
+  const send = () => window.parent.postMessage({ type: 'musicbox:size', height: Math.ceil(full.getBoundingClientRect().height) + 2 }, '*');
+  new ResizeObserver(send).observe(full);
+  send();
 }
 
 function recordsSection() {
@@ -929,6 +1014,14 @@ function recordsSection() {
             try { await navigator.clipboard.writeText(r.url); e.target.textContent = 'Copied ✓'; } catch { prompt('Copy this link', r.url); }
           },
         }, 'Copy link'),
+        h('button', {
+          class: 'btn',
+          onclick: () => {
+            const body = h('div', { class: 'modal-body' });
+            modal(body);
+            showShareResult(body, r.url, false, { title: r.title, again: null, existing: true, openEmbed: true });
+          },
+        }, 'Embed'),
         h('button', {
           class: 'btn danger',
           onclick: async () => {
@@ -972,6 +1065,7 @@ async function recordView(payload, stale) {
     currentSource = { pid: 'record', id: payload, name: rec.title, card: new URLSearchParams(location.search).get('c') || '' };
     player.cueList(rec.tracks, 0);
   }
+  if (EMBED) embedFooter(rec);
   const play = (shuffle) => {
     currentSource = { pid: 'record', id: payload, name: rec.title, card: new URLSearchParams(location.search).get('c') || '' };
     player.playList(rec.tracks, 0, { shuffle });
@@ -1065,7 +1159,7 @@ let shownQueue = null;
 let shownTrackId = null;
 const lcdCache = new Map(); // element -> last text drawn, so digits only re-render when they change
 
-const deckVisible = () => Boolean(popWin) || wide.matches || document.body.classList.contains('full-open');
+const deckVisible = () => Boolean(EMBED) || Boolean(popWin) || wide.matches || document.body.classList.contains('full-open');
 
 /** Transport button: an icon, plus a text label that "labels" skins show instead. */
 function deckButton(name, label, onclick, id, text) {
@@ -1132,7 +1226,7 @@ function buildPlayerUi() {
           deckButton('pause', 'Pause', () => (player.playing ? player.toggle() : null), 'btn-pause', 'PAUSE'),
           deckButton('stop', 'Stop', () => player.stop(), null, 'STOP'),
           deckButton('next', 'Next', () => player.next(), null, 'NEXT'),
-          deckButton('eject', 'Open library', () => { closeFull(); location.hash = hashFor.home(); }, null, 'EJECT'),
+          deckButton('eject', EMBED ? 'Open in Music Box' : 'Open library', () => (EMBED ? window.open(fullPageUrl(), '_blank', 'noopener') : (closeFull(), location.hash = hashFor.home())), null, 'EJECT'),
           h('span', { class: 'spacer' }),
           deckButton('shuffle', 'Shuffle', () => player.toggleShuffle(), 'btn-shuffle', 'SHUF'),
           deckButton('repeat', 'Repeat', () => player.cycleRepeat(), 'btn-repeat', 'REP')),
@@ -1729,6 +1823,15 @@ async function start() {
   buildPlayerUi();
   applySkin(currentSkin());
   requestAnimationFrame(() => paintSkinArt(currentSkin()));
+  if (EMBED) {
+    await store.init();
+    updateOnline();
+    updatePlayerUi();
+    syncViz();
+    render();
+    reportEmbedSize();
+    return;
+  }
   await store.init();
   if (store.isBlocked()) {
     toast('Music Box is open in another tab or window. Close the others so this tab can save songs and pictures.', { timeout: 9000 });

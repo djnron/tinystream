@@ -1,4 +1,3 @@
-import { CONFIG } from '../config.js';
 import * as downloads from './downloads.js';
 import { icons } from './icons.js';
 import { Player } from './player.js';
@@ -781,7 +780,6 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
           h('strong', {}, 'Dropbox needs your OK to save pictures'),
           h('p', {}, 'Your pictures go in a “Music Box” folder in your Dropbox, so people with the link can see them. '
             + 'Press Continue, then ', h('strong', {}, 'Allow'), ' in Dropbox. You’ll come back here and the link is made.'),
-          ownerSetup('files.content.write'),
           h('div', { class: 'actions' },
             h('button', { class: 'btn', onclick: () => { pics.checked = false; go.click(); } }, 'Share without pictures'),
             h('button', {
@@ -795,7 +793,6 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
         status.replaceChildren(h('div', { class: 'callout' },
           h('strong', {}, 'Dropbox needs your OK to make share links'),
           h('p', {}, 'Press Continue, then ', h('strong', {}, 'Allow'), ' in Dropbox. You’ll come back here and the link is made.'),
-          ownerSetup('sharing.read', 'sharing.write'),
           h('button', {
             class: 'btn primary',
             onclick: () => {
@@ -814,28 +811,6 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
 }
 
 const DROPBOX_CONSOLE = 'https://www.dropbox.com/developers/apps';
-const dropboxPermissionsPage = () => `${DROPBOX_CONSOLE}/info/${CONFIG.dropboxAppKey}#permissions`;
-
-/**
- * The App Console steps, which only the Dropbox app's owner can do. Folded away when they're a
- * fallback (most people just approve), open when Dropbox already refused.
- */
-function ownerSetup(...scopes) {
-  const open = scopes[0] === true && scopes.shift();
-  const ticks = scopes.flatMap((sc, i) => [i ? ' and ' : '', h('strong', {}, sc)]);
-  const steps = h('ol', { class: 'steps' },
-    h('li', {}, 'Open your app’s ', h('a', { href: dropboxPermissionsPage(), target: '_blank', rel: 'noopener' }, 'Permissions page'),
-      ' in the Dropbox App Console (opens in a new tab).'),
-    h('li', {}, 'Tick ', ...ticks, '.'),
-    h('li', {}, 'Click ', h('strong', {}, 'Submit'), ' at the bottom of the page. The tick doesn’t count until you do.'),
-    h('li', {}, 'Come back here and press ', h('strong', {}, open ? 'Try again' : 'Continue to Dropbox'), '.'));
-  if (open) return steps;
-  return h('details', { class: 'owner-setup' },
-    h('summary', {}, 'Dropbox didn’t ask, or said no?'),
-    h('p', { class: 'setting-desc' }, 'The Dropbox app behind Music Box needs this turned on first. Only the app’s owner can do it:'),
-    steps);
-}
-
 /** One-time setup for picking from anywhere in Dropbox: the sharing permission, and the Chooser domain. */
 function dropboxPickHelp() {
   const dlg = modal(h('div', { class: 'modal-body' },
@@ -857,8 +832,8 @@ function dropboxPickHelp() {
 /**
  * Back from Dropbox without everything the share needs: say exactly which permission is missing
  * (instead of going round to the same step again), with "Try again" and, for pictures, a way to
- * share without them. Dropbox only leaves a permission out when its app doesn't have it switched
- * on, so the App Console steps are shown open here.
+ * share without them. (Dropbox only leaves a permission out when it's switched off in the app's
+ * settings; docs/HANDOFF.md has the fix.)
  */
 function dropboxSharingHelp(detail, pending) {
   const { dropbox } = providers;
@@ -873,12 +848,9 @@ function dropboxSharingHelp(detail, pending) {
   const dlg = modal(h('div', { class: 'modal-body' },
     h('h2', {}, needPictures ? 'Dropbox didn’t allow saving pictures' : 'Dropbox didn’t allow share links'),
     detail && h('p', { class: 'setting-desc' }, 'Dropbox said: ', h('em', {}, detail)),
-    h('p', {}, 'This means the Dropbox app behind Music Box doesn’t have that permission switched on yet. '
-      + 'Its owner can fix it in a minute:'),
-    needPictures ? ownerSetup(true, 'files.content.write') : ownerSetup(true, 'sharing.read', 'sharing.write'),
-    h('p', { class: 'setting-desc' }, needPictures
-      ? 'Not the owner? Share without pictures for now. The songs and the rest of your skin still go with the link.'
-      : 'Not the owner? Ask them to do this, then try again.'),
+    h('p', {}, needPictures
+      ? 'You can share now without the pictures. The songs and the rest of your skin still go with the link.'
+      : 'Press Try again and choose Allow in Dropbox.'),
     h('div', { class: 'actions' },
       needPictures
         ? h('button', { class: 'btn', onclick: () => { dlg.close(); openShareDialog({ ...pending, withPictures: false }, { auto: true }); } }, 'Share without pictures')

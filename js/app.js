@@ -7,7 +7,7 @@ import * as store from './store.js';
 import { AuthRequiredError, extOf, fmtBytes, h, IS_IOS, isNetworkError, toast } from './util.js';
 import { lcdDigits, lcdTime } from './lcd.js';
 import { paint as paintSkinArt, repaint as repaintSkinArt, setOtherDocument } from './skin-art.js';
-import { generateSkin, museumUrl } from './skin-generator.js';
+import { generateSkin, museumUrl, seeded } from './skin-generator.js';
 import { makeCover } from './cover.js';
 import { adoptPicture, setPictureDoc } from './pictures.js';
 import { applySkin, parseSkinFile, SKINS, skinTemplate, TOKENS } from './skins.js';
@@ -639,7 +639,15 @@ async function generateAndApply() {
   generating = true;
   const before = { skin: store.settings.skin, customSkin: store.settings.customSkin };
   try {
-    const sk = await generateSkin({ previous: currentSkin().layout });
+    // Each roll comes from one number (its seed), so a shared record can carry just that number and
+    // the listener's app rebuilds the same skin. Re-roll until the arrangement differs from the last.
+    const prev = currentSkin().layout;
+    let sk;
+    for (let i = 0; i < 12; i++) {
+      const seed = Math.floor(Math.random() * 2 ** 31);
+      sk = { ...await generateSkin({ rand: seeded(seed) }), gen: seed };
+      if (!prev || (sk.layout.deck !== prev.deck && sk.layout.buttons !== prev.buttons)) break;
+    }
     store.setSetting('customSkin', sk);
     useSkin(sk);
     const from = sk.inspiredBy.map((src) => src.name).join(' + ');

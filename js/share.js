@@ -11,7 +11,7 @@
 import { CONFIG } from '../config.js';
 import { pictureBlob, setRemoteLoader, validatePicture } from './pictures.js';
 import { getProvider } from './providers/index.js';
-import { solidColor, TOKENS, validateArt, validateFonts, validateLayout, validateTokens } from './skins.js';
+import { DEFAULT_LAYOUT, SKINS, solidColor, TOKENS, validateArt, validateFonts, validateLayout, validateTokens } from './skins.js';
 import { stripExt, withAudioType } from './util.js';
 
 const RECORDS_KEY = 'mb.records';
@@ -73,6 +73,60 @@ async function makeCard({ title, count, skin, cover }) {
   });
 }
 
+// ---------- keeping links short ----------
+//
+// Version 2 records leave out everything the listener's app can work out for itself: a built-in
+// skin is sent as its id, a custom skin only as what differs from the defaults, Dropbox songs as
+// just their link (the file name is in it), and no file sizes. Version 1 links still open.
+
+const shortHex = (v) => String(v).replace(/#([0-9a-f])\1([0-9a-f])\2([0-9a-f])\3\b/gi, '#$1$2$3');
+
+function leanSkin(skin, pictureRows) {
+  if (!skin) return undefined;
+  const builtIn = SKINS.find((s) => s.id === skin.id);
+  if (builtIn && !pictureRows.length && !skin.fonts?.length) return skin.id;
+  // A skin straight from the dice: its seed rebuilds it exactly (see generateAndApply in app.js).
+  if (Number.isInteger(skin.gen) && skin.id === 'custom' && !pictureRows.length) return { g: skin.gen };
+  const k = {};
+  for (const [key, value] of Object.entries(skin.tokens || {})) if (TOKENS[key] !== value) k[key] = shortHex(value);
+  const l = {};
+  for (const [key, value] of Object.entries(skin.layout || {})) if (DEFAULT_LAYOUT[key] !== value) l[key] = value;
+  return {
+    n: skin.name,
+    k: Object.keys(k).length ? k : undefined,
+    l: Object.keys(l).length ? l : undefined,
+    a: skin.art || undefined,
+    f: skin.fonts?.length ? skin.fonts : undefined,
+    p: pictureRows.length ? pictureRows : undefined,
+  };
+}
+
+const DROPBOX_LEAN = /^\/scl\/fi\/([a-z0-9]+)\/([^/?]+)\?rlkey=([a-z0-9]+)$/i;
+
+/** One song: a Dropbox link becomes "id/name?key"; Google Drive songs are [g, id, name, key?]. */
+function leanSong(x) {
+  if (x.src === 'd') {
+    const m = DROPBOX_LEAN.exec(x.ref);
+    if (m && decodeURIComponent(m[2]) === x.name) return `${m[1]}/${m[2]}?${m[3]}`;
+    return ['d', x.ref, x.name];
+  }
+  return x.key ? ['g', x.ref, x.name, x.key] : ['g', x.ref, x.name];
+}
+
+/** Version 2 songs back to version 1 rows: [src, ref, name, size, key]. */
+function expandSong(row) {
+  if (typeof row === 'string') {
+    const m = /^([a-z0-9]+)\/([^/?]+)\?([a-z0-9]+)$/i.exec(row);
+    if (!m) return null;
+    let name;
+    try { name = decodeURIComponent(m[2]); } catch { return null; }
+    return ['d', `/scl/fi/${m[1]}/${m[2]}?rlkey=${m[3]}`, name, 0, 0];
+  }
+  if (!Array.isArray(row)) return null;
+  const [src, ref, name, key] = row;
+  return [src, ref, name, 0, key || 0];
+}
+
 // ---------- making a record ----------
 
 /** Dropbox share URL -> the path on dl.dropboxusercontent.com (the host that allows web players). */
@@ -109,15 +163,11 @@ export async function createRecord({ title, tracks, skin, noDownload, withPictur
     onProgress?.(i + 1, list.length);
   }
   const payload = await encode({
-    v: 1,
+    v: 2,
     t: title.slice(0, 80),
-    d: noDownload ? 1 : 0,
-    s: skin ? {
-      n: skin.name, k: skin.tokens, l: skin.layout, a: skin.art,
-      f: skin.fonts?.length ? skin.fonts : undefined,
-      p: pics.rows.length ? pics.rows : undefined,
-    } : null,
-    r: items.map((x) => [x.src, x.ref, x.name, x.size || 0, x.key || 0]),
+    d: noDownload ? 1 : undefined,
+    s: leanSkin(skin, pics.rows),
+    r: items.map(leanSong),
   });
   // The link preview picture: a snapshot of the player, saved next to the songs. Optional: if it
   // can't be made or saved, previews fall back to a drawn version of the player.
@@ -295,7 +345,20 @@ function saveRecords(list) {
 /** Decodes and checks a record link. Everything in it is treated as untrusted. */
 export async function openRecord(payload) {
   const data = await decode(payload);
-  if (!data || data.v !== 1 || !Array.isArray(data.r)) throw new Error('This record link is damaged');
+  if (!data || (data.v !== 1 && data.v !== 2) || !Array.isArray(data.r)) throw new Error('This record link is damaged');
+  if (data.v === 2) {
+    data.r = data.r.map(expandSong).filter(Boolean);
+    // A built-in skin travels as its id.
+    if (typeof data.s === 'string') {
+      const builtIn = SKINS.find((s) => s.id === data.s);
+      data.s = builtIn ? { n: builtIn.name, k: builtIn.tokens, l: builtIn.layout, a: builtIn.art } : null;
+    } else if (Number.isInteger(data.s?.g)) {
+      // A generated skin travels as its seed. (Changing the generator changes how these look.)
+      const { generateSkin, seeded } = await import('./skin-generator.js');
+      const g = await generateSkin({ rand: seeded(data.s.g >>> 0) });
+      data.s = { n: g.name, k: g.tokens, l: g.layout, a: g.art };
+    }
+  }
   const title = String(data.t || 'Untitled record').slice(0, 80);
   const noDownload = Boolean(data.d);
   let skin = null;

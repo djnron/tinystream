@@ -785,13 +785,9 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
       const pending = () => ({ pid, folderId, name, title: titleInput.value, noDownload: lock.checked, withPictures: pics.checked });
       if (err.code === 'dropbox-picture-scope') {
         status.replaceChildren(h('div', { class: 'callout' },
-          h('strong', {}, 'One-time step: let Dropbox save your pictures'),
-          h('ol', { class: 'steps' },
-            h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
-              ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
-              h('strong', {}, 'files.content.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
-            h('li', {}, 'Come back here and press Continue to Dropbox. After you approve, your link is made.')),
-          h('p', { class: 'setting-desc' }, 'Music Box only adds files to a “Music Box” folder in your Dropbox.'),
+          h('strong', {}, 'Dropbox needs your OK to save pictures'),
+          h('p', {}, 'Your pictures go in a “Music Box” folder in your Dropbox, so people with the link can see them. '
+            + 'Press Continue, then ', h('strong', {}, 'Allow'), ' in Dropbox. You’ll come back here and the link is made.'),
           h('div', { class: 'actions' },
             h('button', { class: 'btn', onclick: () => { pics.checked = false; go.click(); } }, 'Share without pictures'),
             h('button', {
@@ -803,12 +799,8 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
             }, 'Continue to Dropbox →'))));
       } else if (err.code === 'dropbox-scope') {
         status.replaceChildren(h('div', { class: 'callout' },
-          h('strong', {}, 'One-time step: let Dropbox make share links'),
-          h('ol', { class: 'steps' },
-            h('li', {}, 'In the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'),
-              ' (opens in a new tab), open your app → ', h('strong', {}, 'Permissions'), ', tick ',
-              h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'), ', and click ', h('strong', {}, 'Submit'), '.'),
-            h('li', {}, 'Come back here and press Continue to Dropbox. After you approve, Dropbox brings you back and your link is made.')),
+          h('strong', {}, 'Dropbox needs your OK to make share links'),
+          h('p', {}, 'Press Continue, then ', h('strong', {}, 'Allow'), ' in Dropbox. You’ll come back here and the link is made.'),
           h('button', {
             class: 'btn primary',
             onclick: () => {
@@ -827,7 +819,6 @@ async function openShareDialog({ pid, folderId, name, title, noDownload = true, 
 }
 
 const DROPBOX_CONSOLE = 'https://www.dropbox.com/developers/apps';
-
 /** One-time setup for picking from anywhere in Dropbox: the sharing permission, and the Chooser domain. */
 function dropboxPickHelp() {
   const dlg = modal(h('div', { class: 'modal-body' },
@@ -846,27 +837,33 @@ function dropboxPickHelp() {
       h('button', { class: 'btn primary', onclick: () => providers.dropbox.connect({ sharing: true, back: location.hash }) }, 'Continue to Dropbox →'))));
 }
 
-/** Explains the one-time Dropbox setting for sharing, with what Dropbox said if it refused. */
+/**
+ * Back from Dropbox without everything the share needs: say exactly which permission is missing
+ * (instead of going round to the same step again), with "Try again" and, for pictures, a way to
+ * share without them. (Dropbox only leaves a permission out when it's switched off in the app's
+ * settings; docs/HANDOFF.md has the fix.)
+ */
 function dropboxSharingHelp(detail, pending) {
+  const { dropbox } = providers;
+  const needPictures = Boolean(pending?.withPictures) && dropbox.canShare() && !dropbox.canUploadPictures();
+  const tryAgain = pending && h('button', {
+    class: 'btn primary',
+    onclick: () => {
+      sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending));
+      dropbox.connect({ sharing: true, pictures: Boolean(pending.withPictures), back: hashFor.folder(pending.pid, pending.folderId, pending.name) });
+    },
+  }, 'Try again');
   const dlg = modal(h('div', { class: 'modal-body' },
-    h('h2', {}, 'Dropbox hasn’t allowed sharing yet'),
+    h('h2', {}, needPictures ? 'Dropbox didn’t allow saving pictures' : 'Dropbox didn’t allow share links'),
     detail && h('p', { class: 'setting-desc' }, 'Dropbox said: ', h('em', {}, detail)),
-    h('p', {}, 'Turn on two permissions for your Dropbox app. You only do this once:'),
-    h('ol', { class: 'steps' },
-      h('li', {}, 'Open the ', h('a', { href: DROPBOX_CONSOLE, target: '_blank', rel: 'noopener' }, 'Dropbox App Console'), ' and click your app.'),
-      h('li', {}, 'Go to the ', h('strong', {}, 'Permissions'), ' tab.'),
-      h('li', {}, 'Tick ', h('strong', {}, 'sharing.read'), ' and ', h('strong', {}, 'sharing.write'), '.'),
-      h('li', {}, 'Click ', h('strong', {}, 'Submit'), ' at the bottom of the page.')),
-    h('p', { class: 'setting-desc' }, 'Then press Try again. Dropbox asks you to approve, then brings you back here and makes your link.'),
+    h('p', {}, needPictures
+      ? 'You can share now without the pictures. The songs and the rest of your skin still go with the link.'
+      : 'Press Try again and choose Allow in Dropbox.'),
     h('div', { class: 'actions' },
-      h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close'),
-      pending && h('button', {
-        class: 'btn primary',
-        onclick: () => {
-          sessionStorage.setItem(PENDING_SHARE, JSON.stringify(pending));
-          providers.dropbox.connect({ sharing: true, back: hashFor.folder(pending.pid, pending.folderId, pending.name) });
-        },
-      }, 'Try again'))));
+      needPictures
+        ? h('button', { class: 'btn', onclick: () => { dlg.close(); openShareDialog({ ...pending, withPictures: false }, { auto: true }); } }, 'Share without pictures')
+        : h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close'),
+      tryAgain)));
 }
 
 /**
@@ -1874,9 +1871,11 @@ async function start() {
       sessionStorage.removeItem(PENDING_SHARE);
       if (pending) {
         history.replaceState(null, '', hashFor.folder(pending.pid, pending.folderId, pending.name));
-        if (dropbox.canShare()) {
+        if (dropbox.canShare() && (!pending.withPictures || dropbox.canUploadPictures())) {
           toast('Dropbox can now make share links. Creating your record…');
           setTimeout(() => openShareDialog(pending, { auto: true }), 300);
+        } else if (dropbox.canShare()) {
+          setTimeout(() => dropboxSharingHelp('', pending), 300); // pictures weren't allowed: explain, don't loop
         } else {
           setTimeout(() => dropboxSharingHelp('the sharing permission wasn\'t granted', pending), 300);
         }

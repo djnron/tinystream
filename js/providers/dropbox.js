@@ -127,7 +127,11 @@ const headerJson = (obj) =>
 async function call(url, init = {}) {
   const send = (token) => fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` } });
   let res = await send(await getToken());
-  if (res.status === 401) res = await send(await getToken({ forceRefresh: true }));
+  if (res.status === 401) {
+    const text = await res.clone().text().catch(() => '');
+    if (/missing_scope/.test(text)) throw new Error(`missing_scope: ${text.slice(0, 200)}`);
+    res = await send(await getToken({ forceRefresh: true }));
+  }
   if (res.status === 401) throw new AuthRequiredError(ID);
   if (!res.ok) {
     const detail = await res.text().catch(() => '');

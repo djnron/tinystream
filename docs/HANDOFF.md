@@ -90,7 +90,11 @@ or access token.**
   - Consent screen: External.
 - **Dropbox app "tinystream2"** (key `nmjcq8ad1u1qfyh`):
   - Full Dropbox, scopes `files.metadata.read`, `files.content.read`, `sharing.read`,
-    `sharing.write` (`files.content.write` optional, for pictures in records).
+    `sharing.write` and `files.content.write` (for pictures in records).
+  - If sharing says "Dropbox didn’t allow share links" or "…saving pictures", one of those is
+    switched off. Fix: App Console → tinystream2 → Permissions, tick it, click **Submit** (the tick
+    doesn't count until then), then Try again in Music Box. Only the owner can do this, so the app
+    doesn't show these steps to listeners.
   - "Allow public clients (PKCE)" on.
   - Redirect URIs for both sites.
   - Chooser domains set.
